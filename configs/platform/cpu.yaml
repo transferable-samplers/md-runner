@@ -1,0 +1,4 @@
+# @package _global_
+platform_name: CPU
+platform_properties:
+  Threads: 1
