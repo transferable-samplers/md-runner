@@ -25,7 +25,7 @@ CPU
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, Optional
 
 import hydra
 import numpy as np
@@ -42,7 +42,30 @@ logger = logging.getLogger(__name__)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="generate_md.yaml")
-def generate_md(cfg: DictConfig) -> Optional[float]:
+def generate_md(cfg: DictConfig) -> None:
+    """
+    Generate molecular dynamics simulation data from a PDB file.
+
+    This function runs an MD simulation using OpenMM, saving trajectory data in chunks.
+    It supports resuming from previous chunks if the simulation was interrupted.
+
+    Args:
+        cfg: Hydra configuration dictionary containing:
+            - pdb_filename: Name of the PDB file (without .pdb extension)
+            - pdb_dir: Directory containing PDB files
+            - output_dir: Directory to save simulation output
+            - temperature: Simulation temperature in Kelvin
+            - frame_interval: Number of integration steps between saved frames
+            - frames_per_chunk: Number of frames to save per chunk file
+            - time_ns: Total simulation time in nanoseconds
+            - warmup_steps: Number of integration steps for warmup
+            - log_freq: Frequency of logging (in integration steps)
+            - platform_name: OpenMM platform name (e.g., "CPU", "CUDA")
+            - platform_properties: Optional platform-specific properties
+
+    Returns:
+        None: Function exits early if final chunk already exists.
+    """
     assert cfg.pdb_filename is not None, "pdb_filename must be specified in the config"
     assert cfg.frame_interval > 0
     assert cfg.frames_per_chunk > 0
@@ -190,7 +213,9 @@ def generate_md(cfg: DictConfig) -> Optional[float]:
             simulation.step(cfg.frame_interval)
             st = simulation.context.getState(getPositions=True, getVelocities=True)
             coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
-            velocities = st.getVelocities(asNumpy=True).value_in_unit(openmm.unit.nanometer / openmm.unit.picosecond)
+            velocities = st.getVelocities(asNumpy=True).value_in_unit(
+                openmm.unit.nanometer / openmm.unit.picosecond
+            )
             chunk_positions.append(coords)
             chunk_velocities.append(velocities)
 
@@ -207,9 +232,9 @@ def generate_md(cfg: DictConfig) -> Optional[float]:
         # Save the chunk to npz files.
         chunk_filename = f"chunk_{chunk_idx}.npz"
         chunk_path = chunks_dir / chunk_filename
-        chunk_positions = np.array(chunk_positions, dtype=np.float32)
-        chunk_velocities = np.array(chunk_velocities, dtype=np.float32)
-        np.savez_compressed(chunk_path, positions=chunk_positions, velocities=chunk_velocities)
+        chunk_positions_array = np.array(chunk_positions, dtype=np.float32)
+        chunk_velocities_array = np.array(chunk_velocities, dtype=np.float32)
+        np.savez_compressed(chunk_path, positions=chunk_positions_array, velocities=chunk_velocities_array)
         logger.info(f"Saved chunk {chunk_idx} with {frames_in_chunk} frames to {chunk_path}")
 
 

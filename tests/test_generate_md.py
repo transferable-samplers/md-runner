@@ -60,6 +60,16 @@ def cfg_test_generate_md(shared_tmp_path: Path, dir_with_pdb: Path) -> DictConfi
 
 
 def check_chunk_indexes(chunk_files: list[Path]) -> None:
+    """
+    Verify that chunk file indices are integers and form a contiguous sequence.
+
+    Args:
+        chunk_files: List of chunk file paths to check.
+
+    Raises:
+        AssertionError: If chunk filenames don't follow the expected pattern,
+            are not sorted, contain duplicates, or are not contiguous.
+    """
     # Verify chunk file indices are integer and contiguous
     try:
         indices = [int(p.stem.split("_")[-1]) for p in chunk_files]
@@ -85,7 +95,22 @@ def check_chunk_indexes(chunk_files: list[Path]) -> None:
         raise AssertionError("Chunk indices are not contiguous: " + "; ".join(parts))
 
 
-def check_contiguous_arrays(array_list: list[np.ndarray], alpha: float = 2) -> None:
+def check_contiguous_arrays(array_list: list[np.ndarray], alpha: float = 2.0) -> None:
+    """
+    Verify that arrays in the list form a contiguous trajectory.
+
+    Checks that the displacement between consecutive chunks is not significantly
+    larger than the typical displacement within chunks.
+
+    Args:
+        array_list: List of numpy arrays, each representing a chunk of frames.
+            Each array should have shape (num_frames, num_points, dim).
+        alpha: Multiplier for typical displacement threshold. Boundary displacements
+            exceeding alpha * typical_displacement are considered non-contiguous.
+
+    Raises:
+        AssertionError: If boundary displacement exceeds the threshold.
+    """
     # Calculate typical displacement between consecutive frames for comparison
     all_consecutive_displacements = []
     for chunk_array in array_list:
@@ -118,7 +143,28 @@ def check_contiguous_arrays(array_list: list[np.ndarray], alpha: float = 2) -> N
         )
 
 
-def check_chunks(chunk_files: list[Path], time_per_frame: float, expected_time_length_ns: float) -> None:
+def check_chunks(
+    chunk_files: list[Path],
+    time_per_frame: float,
+    expected_time_length_ns: float,
+) -> None:
+    """
+    Validate chunk files for correctness and consistency.
+
+    Checks that:
+    - Chunk files contain expected data (positions and velocities)
+    - Total simulation time matches expected duration
+    - All chunks have the same number of frames
+    - Trajectories are contiguous across chunk boundaries
+
+    Args:
+        chunk_files: List of paths to chunk .npz files.
+        time_per_frame: Time duration per frame in nanoseconds.
+        expected_time_length_ns: Expected total simulation time in nanoseconds.
+
+    Raises:
+        AssertionError: If any validation check fails.
+    """
     positions_list = []
     velocities_list = []
     assert len(chunk_files) > 1, "Cannot thoroughly check chunks with <= 1 chunk file."
@@ -165,9 +211,9 @@ def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
     Basic test that generate_md can run a simulation.
 
     Asserts:
-    - Simulation runs without errors
-    - Chunk files are created
-    - Chunk files contain expected data
+        - Simulation runs without errors
+        - Chunk files are created
+        - Chunk files contain expected data
     """
     generate_md(cfg_test_generate_md)
 
@@ -187,14 +233,13 @@ def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
 @pytest.mark.forked  # prevents OpenMM issues
 def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
     """
-    Basic test that generate_md can run a simulation.
+    Test that generate_md can resume a simulation from existing chunks.
 
     Asserts:
-    - Simulation runs without errors
-    - Chunk files are created
-    - Chunk files contain expected data
+        - Initial simulation runs and creates chunk files
+        - Resumed simulation continues from existing chunks
+        - All chunk files are valid and contiguous
     """
-
     generate_md(cfg_test_generate_md)
 
     chunks_dir = Path(cfg_test_generate_md.output_dir) / "chunks"
@@ -203,10 +248,11 @@ def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
     chunk_files = list(chunks_dir.glob("chunk_*.npz"))
     assert len(chunk_files) > 0, "No chunk files created before resuming"
 
+    initial_time_ns = cfg_test_generate_md.time_ns
     check_chunks(
         chunk_files,
         cfg_test_generate_md.frame_interval / 1e6,
-        cfg_test_generate_md.time_ns,
+        initial_time_ns,
     )  # Ensure chunks can be collated without errors before resuming
 
     cfg_test_generate_md.time_ns *= 2  # Double simulation time to force resuming

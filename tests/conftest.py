@@ -4,6 +4,7 @@ Shared test fixtures.
 
 import os
 from pathlib import Path
+from typing import Generator
 
 import pytest
 from hydra.core.global_hydra import GlobalHydra
@@ -20,23 +21,34 @@ TEST_SEQUENCE = "PYA"
 
 
 @pytest.fixture(scope="session")
-def shared_tmp_path(tmp_path_factory):
+def shared_tmp_path(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """
     Session-scoped temporary directory shared across all tests.
-    Provides a base directory for organizing test artifacts.
+
+    Provides a base directory for organizing test artifacts that persists
+    for the entire test session.
+
+    Args:
+        tmp_path_factory: Pytest fixture factory for creating temporary paths.
+
+    Returns:
+        Path to the shared temporary directory.
     """
     return tmp_path_factory.mktemp("shared_test_data")
 
 
 @pytest.fixture(scope="session")
-def dir_with_pdb(shared_tmp_path: Path) -> Path:
+def dir_with_pdb(shared_tmp_path: Path) -> Generator[Path, None, None]:
     """
-    Explicitly generates PDB files for tests that need them.
-    
+    Generate PDB files for tests that need them.
+
+    This fixture explicitly generates PDB files once per test session and
+    provides the directory path containing them.
+
     Args:
         shared_tmp_path: Base temporary directory for test artifacts.
-        
-    Returns:
+
+    Yields:
         Path to directory containing generated PDB files.
     """
     GlobalHydra.instance().clear()

@@ -4,18 +4,6 @@ This codebase is the toolkit used to generate the ManyPeptidesMD dataset, in our
 
 The codebase was adapted from the TimeWarp [codebase](https://github.com/microsoft/timewarp)
 
-## Installation
-
-```bash
-micromamba create -f environment.yaml
-```
-
-## Generating PDB Files
-
-
-
-
-
 ## Install
 
 ```bash
@@ -48,11 +36,3 @@ Use the generated PDB files to run molecular dynamics simulations with `generate
 ```bash
 ./scripts/run-md.py
 ```
-
-Run indices split (specify in ./scripts/run-md.py):
-Majdi: +seq_idx="range(0, 700)"
-Charlie: +seq_idx="range(700, 1400)"
-Alex: +seq_idx="range(1400, 2000)"
-## Notes
-
-- Ensure all paths in the configuration file are correct.

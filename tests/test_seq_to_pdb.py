@@ -5,11 +5,14 @@ Tests for seq_to_pdb.py - generating PDB files from sequences.
 from pathlib import Path
 
 import pytest
-from omegaconf import DictConfig
+from hydra.core.global_hydra import GlobalHydra
+from omegaconf import DictConfig, open_dict
 
 from src.seq_to_pdb import seq_to_pdb
+from tests.helpers.utils import compose_config
 
 TEST_SEQUENCE = "PYA"
+
 
 @pytest.fixture(scope="session")
 def cfg_test_seq_to_pdb(shared_tmp_path: Path) -> DictConfig:
@@ -40,11 +43,11 @@ def cfg_test_seq_to_pdb(shared_tmp_path: Path) -> DictConfig:
 @pytest.mark.forked  # prevents OpenMM/tLEaP issues
 def test_seq_to_pdb(cfg_test_seq_to_pdb: DictConfig) -> None:
     """
-    Tests that seq_to_pdb successfully generates PDB files from sequences.
+    Test that seq_to_pdb successfully generates PDB files from sequences.
 
     Asserts:
-    - PDB files are created for each sequence
-    - PDB files are not empty
+        - PDB files are created for each sequence
+        - PDB files are not empty
     """
     # Generate PDB files
     seq_to_pdb(cfg_test_seq_to_pdb)
