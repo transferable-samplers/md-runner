@@ -3,7 +3,6 @@ Generating peptide pdb file with tLEaP. Requires `ambertools` from conda-forge
 to be installed in the current env.
 """
 
-import os
 import shutil
 import subprocess
 import tempfile
@@ -74,23 +73,58 @@ def make_peptide_with_tleap(three_letter_seq, save_path):
     of the first residue, e.g., NMET; as well as a C label to the front of the
     last residue, e.g., CALA.
     """
-    current_work_dir = Path.cwd()
     save_path = Path(save_path).resolve()
-    try:
-        with tempfile.TemporaryDirectory() as tmpdirname:
-            os.chdir(tmpdirname)
-            tmpdir_path = Path(tmpdirname)
-            temp_in_path = tmpdir_path / "temp.in"
-            with temp_in_path.open("w") as f:
-                script = infile_templ % (" ".join(three_letter_seq))
-                f.write(script)
-            subprocess.run(["tleap", "-s", "-f", "temp.in"], capture_output=True, check=False)
-            (tmpdir_path / "leap.log").unlink(missing_ok=True)
-            temp_in_path.unlink(missing_ok=True)
-            shutil.copy(tmpdir_path / "output.pdb", save_path)
-            (tmpdir_path / "output.pdb").unlink(missing_ok=True)
-    finally:
-        os.chdir(current_work_dir)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Resolve absolute path to tleap to avoid partial executable path issues (S607).
+    tleap_executable = shutil.which("tleap")
+    if tleap_executable is None:
+        raise RuntimeError(
+            "Could not find 'tleap' executable on PATH; please install AmberTools and ensure 'tleap' is available.",
+        )
+
+    script = infile_templ % (" ".join(three_letter_seq))
+
+    with tempfile.TemporaryDirectory() as tmpdirname:
+        tmpdir_path = Path(tmpdirname)
+        temp_in_path = tmpdir_path / "temp.in"
+        output_pdb_path = tmpdir_path / "output.pdb"
+
+        # Write tleap input script
+        with temp_in_path.open("w") as f:
+            f.write(script)
+
+        # Run tleap in the temporary directory.
+        # The command is fixed (no shell=True) and only reads user data from temp_in_path.
+        result = subprocess.run(  # noqa: S603
+            [tleap_executable, "-s", "-f", str(temp_in_path)],
+            cwd=tmpdir_path,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0:
+            # Optionally include a bit of stderr to help debugging.
+            stderr_preview = (result.stderr or "").strip().splitlines()
+            stderr_preview = "\n".join(stderr_preview[:10])
+            raise RuntimeError(
+                f"tleap failed with exit code {result.returncode}.\nstderr (first 10 lines):\n{stderr_preview}",
+            )
+
+        if not output_pdb_path.exists():
+            raise FileNotFoundError(
+                f"'output.pdb' was not created by tleap in {tmpdir_path}",
+            )
+
+        # Clean up tleap artifacts we don't need.
+        leap_log_path = tmpdir_path / "leap.log"
+        leap_log_path.unlink(missing_ok=True)
+        temp_in_path.unlink(missing_ok=True)
+
+        # Copy resulting PDB to the requested save_path.
+        shutil.copy(output_pdb_path, save_path)
+        output_pdb_path.unlink(missing_ok=True)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="seq_to_pdb.yaml")
