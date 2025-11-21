@@ -95,7 +95,7 @@ def main(cfg: DictConfig) -> Optional[float]:
         )
     )
     simulation.reporters.append(
-        CheckpointReporter(f"{cfg.output_dir}/checkpoint.chk", cfg.ckpt_freq * cfg.step_size)
+        CheckpointReporter(f"{cfg.output_dir}/checkpoint.chk", cfg.step_size)
     )
     logger.info("minimized. running simulation...")
     simulation.step(cfg.warmup_steps)
@@ -105,16 +105,15 @@ def main(cfg: DictConfig) -> Optional[float]:
         st = simulation.context.getState(getPositions=True)
         coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
         all_positions.append(coords)
-        if (step + 1) % cfg.ckpt_freq == 0:
-            output_filename = f"{step}.npz"
-            all_positions = np.array(all_positions, dtype=np.float32)
-            save_path = os.path.join(cfg.output_dir, cfg.output_filename, output_filename)
-            logger.info(f"saving to {save_path} with shape {all_positions.shape}")
-            os.makedirs(os.path.join(cfg.output_dir, cfg.output_filename), exist_ok=True)
-            np.savez_compressed(save_path, all_positions=all_positions)
-            with open(f"{cfg.output_dir}/system.xml", "w") as output:
-                output.write(XmlSerializer.serialize(system))
-            all_positions = []
+        output_filename = f"{step}.npz"
+        all_positions = np.array(all_positions, dtype=np.float32)
+        save_path = os.path.join(cfg.output_dir, cfg.output_filename, output_filename)
+        logger.info(f"saving to {save_path} with shape {all_positions.shape}")
+        os.makedirs(os.path.join(cfg.output_dir, cfg.output_filename), exist_ok=True)
+        np.savez_compressed(save_path, all_positions=all_positions)
+        with open(f"{cfg.output_dir}/system.xml", "w") as output:
+            output.write(XmlSerializer.serialize(system))
+        all_positions = []
 
 
 if __name__ == "__main__":

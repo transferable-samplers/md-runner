@@ -33,14 +33,12 @@ We use `tLEaP` via `ambertools` to generate PDB files with initial conformations
 python python src/seq_to_pdb.py seq_filename=sequences/example_sequences.txt
 ```
 
-By default this script reads the `./data/sequences.txt` file specified in `genseq.yaml` and generates corresponding PDB files. This will take a few minutes.
-
 ### 2. Run Molecular Dynamics Simulations (Local)
 
 Test / benchmark the MD simulation with the following command:
 
 ```bash
-python mdrunner/generate_md.py pdb_filename=REIRHIEL
+python src/generate_md.py pdb_filename=AA
 ```
 
 ### 2. Run Molecular Dynamics Simulations (SLURM)

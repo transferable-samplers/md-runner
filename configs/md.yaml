@@ -6,14 +6,15 @@ defaults:
   - launcher: null
   - platform: gpu
   - paths: default
+  - hydra: default
+  - _self_
 task_name: md
-# PDB files are stored in data_dir/pdbs/
 pdb_dir: ${paths.data_dir}/pdbs
-pdb_filename: A_capped
-temperature: 300
-warmup_steps: 5000
-step_size: 10000
-num_steps: 100_000
+output_dir: ${paths.data_dir}/md/${pdb_filename}_${temperature}_${num_steps}
+pdb_filename: null
+temperature: 310
+warmup_steps: 50_000
+step_size: 10_000
+num_steps: 10_000
 log_freq: 100
 ckpt_freq: 1000
-output_filename: ${pdb_filename}_${temperature}_${num_steps}
