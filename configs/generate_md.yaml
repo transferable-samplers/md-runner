@@ -10,11 +10,12 @@ defaults:
   - _self_
 task_name: generate_md
 pdb_dir: ${paths.data_dir}/pdbs
-output_dir: ${paths.data_dir}/md/${pdb_filename}_${temperature}_${num_steps}
+output_dir: ${paths.data_dir}/md/${pdb_filename}_${temperature}_${num_frames}
 pdb_filename: null
 temperature: 310
 warmup_steps: 50_000
-step_size: 10_000
-num_steps: 10_000
+frame_interval: 10_000 # How many integration steps between frames collected
+num_frames: 10_000 # Total number of frames to generate
+save_interval: 10 # How many frames per saved npz file, shape = (save_interval, N, 3)
 log_freq: 10
 output_filename: trajectories

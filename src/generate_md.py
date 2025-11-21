@@ -44,6 +44,8 @@ logger = logging.getLogger(__name__)
 def main(cfg: DictConfig) -> Optional[float]:
     pdb_path = os.path.join(cfg.pdb_dir, f"{cfg.pdb_filename}.pdb")
 
+    os.makedirs(cfg.output_dir, exist_ok=True)
+
     pdb = PDBFile(pdb_path)
     topology = pdb.getTopology()
     positions = pdb.getPositions(asNumpy=True)
@@ -67,8 +69,10 @@ def main(cfg: DictConfig) -> Optional[float]:
         1.0 * openmm.unit.femtosecond,
     )
     logger.info(f"Platform name: {cfg.platform_name} {platform_properties}")
-    logger.info(f"Temperature: {cfg.temperature}")
-    logger.info(f"Running {pdb_path} for {cfg.num_steps} steps")
+    logger.info(f"Simulating system {pdb_path} at {cfg.temperature}K")
+    logger.info(f"Interval between saved frames: {cfg.frame_interval}fs")
+    logger.info(f"Number of frames to generate: {cfg.num_frames}")
+    logger.info(f"Total simulation time: {cfg.num_frames * cfg.frame_interval / 1e6} microseconds")
     platform = Platform.getPlatform(cfg.platform_name)
     simulation = Simulation(
         topology,
@@ -82,12 +86,12 @@ def main(cfg: DictConfig) -> Optional[float]:
     simulation.reporters.append(
         StateDataReporter(
             os.path.join(cfg.output_dir, "output.txt"),
-            cfg.log_freq * cfg.step_size,
+            cfg.log_freq * cfg.frame_interval,
             step=True,
             potentialEnergy=True,
             temperature=True,
             progress=True,
-            totalSteps=cfg.num_steps * cfg.step_size,
+            totalSteps=cfg.num_frames * cfg.frame_interval,
             remainingTime=True,
             speed=True,
             elapsedTime=True,
@@ -95,25 +99,26 @@ def main(cfg: DictConfig) -> Optional[float]:
         )
     )
     simulation.reporters.append(
-        CheckpointReporter(f"{cfg.output_dir}/checkpoint.chk", cfg.step_size)
+        CheckpointReporter(f"{cfg.output_dir}/checkpoint.chk", cfg.frame_interval)
     )
-    logger.info("minimized. running simulation...")
+    logger.info("Minimized. running simulation...")
     simulation.step(cfg.warmup_steps)
     all_positions = []
-    for step in tqdm.tqdm(range(cfg.num_steps)):
-        simulation.step(cfg.step_size)
+    for step in range(cfg.num_frames): # removed tqdm due to admin complaints about excessive unbuffered stdout
+        simulation.step(cfg.frame_interval)
         st = simulation.context.getState(getPositions=True)
         coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
         all_positions.append(coords)
         output_filename = f"{step}.npz"
-        all_positions = np.array(all_positions, dtype=np.float32)
-        save_path = os.path.join(cfg.output_dir, cfg.output_filename, output_filename)
-        logger.info(f"saving to {save_path} with shape {all_positions.shape}")
-        os.makedirs(os.path.join(cfg.output_dir, cfg.output_filename), exist_ok=True)
-        np.savez_compressed(save_path, all_positions=all_positions)
-        with open(f"{cfg.output_dir}/system.xml", "w") as output:
-            output.write(XmlSerializer.serialize(system))
-        all_positions = []
+        if not (step + 1) % cfg.save_interval:
+            all_positions = np.array(all_positions, dtype=np.float32)
+            save_path = os.path.join(cfg.output_dir, cfg.output_filename, output_filename)
+            logger.info(f"saving to {save_path} with shape {all_positions.shape}")
+            os.makedirs(os.path.join(cfg.output_dir, cfg.output_filename), exist_ok=True)
+            np.savez_compressed(save_path, all_positions=all_positions)
+            with open(f"{cfg.output_dir}/system.xml", "w") as output:
+                output.write(XmlSerializer.serialize(system))
+            all_positions = []
 
 
 if __name__ == "__main__":
