@@ -5,16 +5,12 @@ Tests for seq_to_pdb.py - generating PDB files from sequences.
 from pathlib import Path
 
 import pytest
-<<<<<<< HEAD
-=======
 from conftest import TEST_SEQUENCE
->>>>>>> 36f676f7857ea19203b246fb07f77ab7eb767697
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
 from src.seq_to_pdb import seq_to_pdb
 from tests.helpers.utils import compose_config
-
 
 
 @pytest.fixture(scope="session")
