@@ -136,6 +136,7 @@ def check_chunks(chunk_files: list[Path], time_per_frame: float, expected_time_l
     check_chunk_indexes(chunk_files)  # Verify chunk file indices are formatted correctly and contiguous
 
     total_frames = 0
+    unique_num_frames = set()
     for chunk_file in chunk_files:
         chunk_data = np.load(chunk_file)
         assert "positions" in chunk_data, "Chunk missing positions"
@@ -149,12 +150,17 @@ def check_chunks(chunk_files: list[Path], time_per_frame: float, expected_time_l
         velocities_list.append(chunk_data["velocities"])
 
         frames_in_chunk = chunk_data["positions"].shape[0]
-        print(frames_in_chunk)
         total_frames += frames_in_chunk
+        unique_num_frames.add(frames_in_chunk)
 
     assert np.isclose(
         total_frames * time_per_frame,
         expected_time_length_ns,
+        rtol=0.001,
+    )
+    assert len(unique_num_frames) == 1, (
+        "Inconsistent number of frames across chunks; expected all chunks to have the same number of frames "
+        f"but found {unique_num_frames}"
     )
 
     check_contiguous_arrays(positions_list)
@@ -182,7 +188,9 @@ def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
     assert len(chunk_files) > 0, "No chunk files created"
 
     check_chunks(
-        chunk_files, cfg_test_generate_md.frame_interval / 1e6, cfg_test_generate_md.time_ns
+        chunk_files,
+        cfg_test_generate_md.frame_interval / 1e6,
+        cfg_test_generate_md.time_ns,
     )  # Ensure chunks can be collated without errors
 
 
@@ -206,7 +214,9 @@ def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
     assert len(chunk_files) > 0, "No chunk files created before resuming"
 
     check_chunks(
-        chunk_files, cfg_test_generate_md.frame_interval / 1e6, cfg_test_generate_md.time_ns
+        chunk_files,
+        cfg_test_generate_md.frame_interval / 1e6,
+        cfg_test_generate_md.time_ns,
     )  # Ensure chunks can be collated without errors before resuming
 
     cfg_test_generate_md.time_ns *= 2  # Double simulation time to force resuming
@@ -216,5 +226,7 @@ def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
     assert len(chunk_files) > 0, "No chunk files created after resuming"
 
     check_chunks(
-        chunk_files, cfg_test_generate_md.frame_interval / 1e6, cfg_test_generate_md.time_ns
+        chunk_files,
+        cfg_test_generate_md.frame_interval / 1e6,
+        cfg_test_generate_md.time_ns,
     )  # Ensure chunks can be collated without errors after resuming
