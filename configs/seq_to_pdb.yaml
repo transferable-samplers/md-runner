@@ -9,4 +9,4 @@ task_name: seq_to_pdb
 seq_filename: null
 hydra:
   run:
-    dir: ${paths.output_dir}/seq_to_pdb
+    dir: ${paths.log_dir}/seq_to_pdb/runs/${now:%Y-%m-%d}_${now:%H-%M-%S}
