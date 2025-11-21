@@ -37,5 +37,7 @@ python src/generate_md.py pdb_filename=AA
 For large-scale dataset generation, use the [hydra-submitit-launcher](https://hydra.cc/docs/plugins/submitit_launcher/) plug-in. An example script is provide in:
 
 ```bash
-./scripts/run-md.py
+./submitit/run-md.py
 ```
+
+Each individual sequence in `seq_filename` will be launched as a separate SLURM job.
