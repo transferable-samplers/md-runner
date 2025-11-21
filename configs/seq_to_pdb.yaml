@@ -1,0 +1,11 @@
+# @package _global_
+
+# specify here default configuration
+# order of defaults determines the order in which configs override each other
+defaults:
+  - _self_
+  - launcher: null
+  - paths: default
+  - optional local: mila
+
+seq_filename: null

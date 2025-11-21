@@ -6,6 +6,14 @@ to be installed in the current env.
 import os
 import shutil
 import tempfile
+import hydra
+from omegaconf import DictConfig
+from tqdm import tqdm
+
+import rootutils
+from dotenv import load_dotenv
+
+rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 aa_321 = {
     "A": "ALA",
@@ -81,23 +89,20 @@ def make_peptide_with_tleap(three_letter_seq, save_path):
     finally:
         os.chdir(current_work_dir)
 
+@hydra.main(version_base="1.3", config_path="../configs", config_name="seq_to_pdb.yaml")
+def main(cfg: DictConfig) -> None:
+
+    pdb_dir = os.path.join(cfg.paths.data_dir, "pdbs")
+    os.makedirs(pdb_dir, exist_ok=True)
+    
+    seq_filename = cfg.seq_filename
+    with open(seq_filename, "r") as f:
+        sequences = [line.strip() for line in f.readlines()]
+    
+    for sequence in tqdm(sequences):
+        save_path = os.path.join(pdb_dir, f"{sequence}.pdb")
+        make_peptide_with_tleap(translate_1letter_to_3letter(sequence), save_path)
+    
 
 if __name__ == "__main__":
-    for sequence in [
-        "A",
-        "AA",
-        "AAA",
-        "AAAA",
-        "AAAAA",
-        "AAAAAA",
-        "AAAAAAA",
-        "AAAAAAAA",
-        "AAAAAAAAA",
-    ]:
-        print(f"Generating zwitter-ion form peptide {sequence} into '{sequence}.pdb'")
-        make_peptide_with_tleap(translate_1letter_to_3letter(sequence), f"{sequence}.pdb")
-        print(f"Generating capped peptide {sequence} into '{sequence}_capped.pdb'")
-        make_peptide_with_tleap(
-            ["ACE"] + translate_1letter_to_3letter(sequence, zwitter_ion=False) + ["NME"],
-            f"{sequence}_capped.pdb",
-        )
+    main()

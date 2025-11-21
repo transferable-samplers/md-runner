@@ -40,7 +40,6 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
 @hydra.main(version_base="1.3", config_path="../configs", config_name="md.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
     pdb_path = os.path.join(cfg.pdb_dir, f"{cfg.pdb_filename}.pdb")
