@@ -1,7 +1,7 @@
 # MD Runner
 
 **MD Runner** is the molecular-dynamics toolkit used to generate the [**ManyPeptidesMD**](https://huggingface.co/datasets/transferable-samplers/many-peptides-md) dataset introduced in our NeurIPS 2025 paper:
-(**Amortized Sampling with Transferable Normalizing Flows**)[https://arxiv.org/abs/2508.18175]
+[**Amortized Sampling with Transferable Normalizing Flows**](https://arxiv.org/abs/2508.18175)
 
 The codebase builds on and extends the MD simulation provided in [**TimeWarp**](https://github.com/microsoft/timewarp).
 
