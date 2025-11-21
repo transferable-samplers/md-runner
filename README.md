@@ -1,6 +1,6 @@
 # MD Runner
 
-**MD Runner** is the molecular-dynamics toolkit used to generate the **ManyPeptidesMD** dataset introduced in our paper:
+**MD Runner** is the molecular-dynamics toolkit used to generate the (**ManyPeptidesMD**)[https://huggingface.co/datasets/transferable-samplers/many-peptides-md] dataset introduced in our paper:
 [**Amortized Sampling with Transferable Normalizing Flows**](https://arxiv.org/abs/2508.18175)
 
 The codebase builds on and extends the MD simulation provided in [**TimeWarp**](https://github.com/microsoft/timewarp).
@@ -41,3 +41,19 @@ For large-scale dataset generation, use the [hydra-submitit-launcher](https://hy
 ```
 
 Each individual sequence in `seq_filename` will be launched as a separate SLURM job.
+
+## Citation
+
+If you use this codebase or our (dataset)[https://huggingface.co/datasets/transferable-samplers/many-peptides-md] helpful, please cite the following paper:
+
+```
+@misc{tan2025amortized
+      title={Amortized Sampling with Transferable Normalizing Flows}, 
+      author={Charlie B. Tan and Majdi Hassan and Leon Klein and Saifuddin Syed and Dominique Beaini and Michael M. Bronstein and Alexander Tong and Kirill Neklyudov},
+      year={2025},
+      eprint={2508.18175},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2508.18175}, 
+}
+```

@@ -203,9 +203,9 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         logger.info("No existing chunks found, starting new simulation...")
         simulation.context.setPositions(positions)
         simulation.minimizeEnergy()
-        logger.info("minimized. running warmup...")
+        logger.info("Minimized. Running warmup...")
         simulation.step(cfg.warmup_steps)
-        logger.info(f"warmup done, ({cfg.warmup_steps} steps)")
+        logger.info(f"Warmup done, ({cfg.warmup_steps} steps)")
 
     logger.info(f"Running simulation: {num_chunks} chunks, starting from chunk {start_chunk}...")
 
