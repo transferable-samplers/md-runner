@@ -1,9 +1,9 @@
 # MD Runner
 
-**MD Runner** is the molecular-dynamics toolkit used to generate the [**ManyPeptidesMD**](https://huggingface.co/datasets/transferable-samplers/many-peptides-md) dataset introduced in our NeurIPS 2025 paper:
-[**Amortized Sampling with Transferable Normalizing Flows**](https://arxiv.org/abs/2508.18175)
+**MD Runner** is the molecular dynamics toolkit used to generate the [**ManyPeptidesMD**](https://huggingface.co/datasets/transferable-samplers/many-peptides-md) dataset introduced in our work:
+[**Amortized Sampling with Transferable Normalizing Flows**](https://arxiv.org/abs/2508.18175) (NeurIPS 2025).
 
-The codebase builds on and extends the MD simulation provided in [**TimeWarp**](https://github.com/microsoft/timewarp).
+The codebase builds on and extends the MD simulation tools provided in [**TimeWarp**](https://github.com/microsoft/timewarp).
 
 ## Installation
 
@@ -44,7 +44,7 @@ Each individual sequence in `seq_filename` will be launched as a separate SLURM 
 
 ## Citation
 
-If you use this codebase or our [dataset](https://huggingface.co/datasets/transferable-samplers/many-peptides-md) helpful, please cite the following paper:
+If you use this codebase or [**ManyPeptidesMD**](https://huggingface.co/datasets/transferable-samplers/many-peptides-md), please cite our paper:
 
 ```
 @misc{tan2025amortized
