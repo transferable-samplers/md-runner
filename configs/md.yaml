@@ -16,7 +16,4 @@ step_size: 10000
 num_steps: 100_000
 log_freq: 100
 ckpt_freq: 1000
-hydra:
-  run:
-    dir: ${paths.outputs_dir}/md
 output_filename: ${pdb_filename}_${temperature}_${num_steps}
