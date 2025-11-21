@@ -66,7 +66,48 @@ def cfg_test_generate_md(shared_tmp_path: Path, cfg_test_seq_to_pdb: DictConfig)
     # Cleanup for next param
     GlobalHydra.instance().clear()
 
-def check_chunks(chunk_dir: Path) -> np.ndarray:
+def check_contiguous_arrays(array_list: list[np.ndarray]) -> None:
+
+    # Check that chunks form a contiguous sequence
+    if len(array_list) > 1:
+        # Calculate typical displacement between consecutive frames for comparison
+        # Use the first chunk to establish baseline
+        all_consecutive_displacements = []
+        for chunk_positions in array_list:
+            # Calculate displacement between consecutive frames within chunk
+            for frame_idx in range(chunk_positions.shape[0] - 1):
+                displacement = np.linalg.norm(
+                    chunk_positions[frame_idx + 1] - chunk_positions[frame_idx], axis=-1
+                )
+                all_consecutive_displacements.extend(displacement)
+
+        breakpoint()
+        
+        typical_displacement = np.median(all_consecutive_displacements)
+        
+        # Check displacement across chunk boundaries
+        for i in range(len(array_list) - 1):
+            last_frame_prev = array_list[i][-1]  # Last frame of chunk i
+            first_frame_next = array_list[i + 1][0]  # First frame of chunk i+1
+            
+            # Calculate the displacement between consecutive frames (across chunk boundary)
+            boundary_displacement = np.linalg.norm(first_frame_next - last_frame_prev, axis=-1)
+            max_boundary_displacement = np.max(boundary_displacement)
+            
+            # The displacement across chunk boundaries should be similar to typical within-chunk displacements
+            # If there's a discontinuity (e.g., simulation was restarted), the displacement would be much larger
+            # Allow 20x tolerance to account for occasional large movements, but catch major discontinuities
+            assert max_boundary_displacement < typical_displacement * 1.5, (
+                f"Chunk {i} and {i+1} are not contiguous: "
+                "Dispalce"
+
+
+                f"max displacement across boundary = {max_boundary_displacement:.6f}, "
+                f"typical displacement = {typical_displacement:.6f}"
+            )
+ 
+def check_chunks(chunk_dir: Path):
+
     positions_list = []
     velocities_list = []
     chunk_files = list(chunk_dir.glob("chunk_*.npz"))
@@ -80,7 +121,8 @@ def check_chunks(chunk_dir: Path) -> np.ndarray:
         assert chunk_data["velocities"].shape[0] > 0, "Chunk has no velocity frames"
         positions_list.append(chunk_data["positions"])
         velocities_list.append(chunk_data["velocities"])
-    return np.concatenate(positions_list, axis=0), np.concatenate(velocities_list, axis=0)
+    check_contiguous_arrays(positions_list)
+    check_contiguous_arrays(velocities_list)
 
 @pytest.mark.forked  # prevents OpenMM issues
 def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
