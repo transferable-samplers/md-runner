@@ -8,7 +8,7 @@ defaults:
   - paths: default
   - hydra: default
   - _self_
-task_name: md
+task_name: generate_md
 pdb_dir: ${paths.data_dir}/pdbs
 output_dir: ${paths.data_dir}/md/${pdb_filename}_${temperature}_${num_steps}
 pdb_filename: null
@@ -16,5 +16,5 @@ temperature: 310
 warmup_steps: 50_000
 step_size: 10_000
 num_steps: 10_000
-log_freq: 100
-ckpt_freq: 1000
+log_freq: 10
+output_filename: trajectories
