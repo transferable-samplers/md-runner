@@ -6,12 +6,11 @@ to be installed in the current env.
 import os
 import shutil
 import tempfile
+
 import hydra
+import rootutils
 from omegaconf import DictConfig
 from tqdm import tqdm
-
-import rootutils
-from dotenv import load_dotenv
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -89,19 +88,20 @@ def make_peptide_with_tleap(three_letter_seq, save_path):
     finally:
         os.chdir(current_work_dir)
 
+
 @hydra.main(version_base="1.3", config_path="../configs", config_name="seq_to_pdb.yaml")
 def main(cfg: DictConfig) -> None:
     pdb_dir = os.path.join(cfg.paths.data_dir, "pdbs")
     os.makedirs(pdb_dir, exist_ok=True)
-    
+
     seq_filename = cfg.seq_filename
-    with open(seq_filename, "r") as f:
+    with open(seq_filename) as f:
         sequences = [line.strip() for line in f.readlines()]
-    
+
     for sequence in tqdm(sequences):
         save_path = os.path.join(pdb_dir, f"{sequence}.pdb")
         make_peptide_with_tleap(translate_1letter_to_3letter(sequence), save_path)
-    
+
 
 if __name__ == "__main__":
     main()

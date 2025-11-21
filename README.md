@@ -46,13 +46,13 @@ python src/generate_md.py pdb_filename=AA
 Use the generated PDB files to run molecular dynamics simulations with `generate_md.py`. Copy and string-ify the sequences from the sequences.txt and list them off in the sequences arg in `scripts/run-md.py`.
 
 ```bash
-./scripts/run-md.py 
+./scripts/run-md.py
 ```
 
 Run indices split (specify in ./scripts/run-md.py):
 Majdi: +seq_idx="range(0, 700)"
 Charlie: +seq_idx="range(700, 1400)"
-Alex: +seq_idx="range(1400, 2000)" 
+Alex: +seq_idx="range(1400, 2000)"
 ## Notes
 
 - Ensure all paths in the configuration file are correct.

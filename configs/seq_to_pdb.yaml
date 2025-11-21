@@ -5,6 +5,6 @@
 defaults:
   - paths: default
   - hydra: default
-  - _self_ 
+  - _self_
 task_name: seq_to_pdb
 seq_filename: null
