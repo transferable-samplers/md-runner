@@ -7,11 +7,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from conftest import TEST_SEQUENCE
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
 from src.generate_md import generate_md
+from tests.conftest import TEST_SEQUENCE
 from tests.helpers.utils import compose_config
 
 # Create report directory if it doesn't exist

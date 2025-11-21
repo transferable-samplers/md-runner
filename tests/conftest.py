@@ -3,12 +3,12 @@ Shared test fixtures.
 """
 
 import os
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 from hydra.core.global_hydra import GlobalHydra
-from omegaconf import DictConfig, open_dict
+from omegaconf import open_dict
 
 from src.seq_to_pdb import seq_to_pdb
 from tests.helpers.utils import compose_config
