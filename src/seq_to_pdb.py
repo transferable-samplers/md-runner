@@ -5,7 +5,9 @@ to be installed in the current env.
 
 import os
 import shutil
+import subprocess
 import tempfile
+from pathlib import Path
 
 import hydra
 import rootutils
@@ -72,34 +74,36 @@ def make_peptide_with_tleap(three_letter_seq, save_path):
     of the first residue, e.g., NMET; as well as a C label to the front of the
     last residue, e.g., CALA.
     """
-    current_work_dir = os.getcwd()
-    save_path = os.path.abspath(save_path)
+    current_work_dir = Path.cwd()
+    save_path = Path(save_path).resolve()
     try:
         with tempfile.TemporaryDirectory() as tmpdirname:
             os.chdir(tmpdirname)
-            with open("temp.in", "w") as f:
+            tmpdir_path = Path(tmpdirname)
+            temp_in_path = tmpdir_path / "temp.in"
+            with temp_in_path.open("w") as f:
                 script = infile_templ % (" ".join(three_letter_seq))
                 f.write(script)
-            os.system("tleap -s -f temp.in > /dev/null")
-            os.remove("leap.log")
-            os.remove("temp.in")
-            shutil.copy("output.pdb", save_path)
-            os.remove("output.pdb")
+            subprocess.run(["tleap", "-s", "-f", "temp.in"], capture_output=True, check=False)
+            (tmpdir_path / "leap.log").unlink(missing_ok=True)
+            temp_in_path.unlink(missing_ok=True)
+            shutil.copy(tmpdir_path / "output.pdb", save_path)
+            (tmpdir_path / "output.pdb").unlink(missing_ok=True)
     finally:
         os.chdir(current_work_dir)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="seq_to_pdb.yaml")
 def main(cfg: DictConfig) -> None:
-    pdb_dir = os.path.join(cfg.paths.data_dir, "pdbs")
-    os.makedirs(pdb_dir, exist_ok=True)
+    pdb_dir = Path(cfg.paths.data_dir) / "pdbs"
+    pdb_dir.mkdir(parents=True, exist_ok=True)
 
     seq_filename = cfg.seq_filename
-    with open(seq_filename) as f:
+    with Path(seq_filename).open() as f:
         sequences = [line.strip() for line in f.readlines()]
 
     for sequence in tqdm(sequences):
-        save_path = os.path.join(pdb_dir, f"{sequence}.pdb")
+        save_path = pdb_dir / f"{sequence}.pdb"
         make_peptide_with_tleap(translate_1letter_to_3letter(sequence), save_path)
 
 

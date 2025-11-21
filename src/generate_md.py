@@ -24,7 +24,7 @@ CPU
 """
 
 import logging
-import os
+from pathlib import Path
 from typing import Optional
 
 import hydra
@@ -48,7 +48,7 @@ def main(cfg: DictConfig) -> Optional[float]:
     assert cfg.frames_per_chunk > 0
     assert cfg.time_ns > 0
 
-    pdb_path = os.path.join(cfg.pdb_dir, f"{cfg.pdb_filename}.pdb")
+    pdb_path = Path(cfg.pdb_dir) / f"{cfg.pdb_filename}.pdb"
 
     # Calculate number of frames from time period
     # Each integration step is 1 fs, frame_interval steps between frames
@@ -67,19 +67,16 @@ def main(cfg: DictConfig) -> Optional[float]:
         f"(last chunk may contain fewer frames).",
     )
 
-    chunks_dir = os.path.join(cfg.output_dir, "chunks")
-    os.makedirs(cfg.output_dir, exist_ok=True)
-    os.makedirs(chunks_dir, exist_ok=True)
+    chunks_dir = Path(cfg.output_dir) / "chunks"
+    Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
+    chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    final_chunk_path = os.path.join(
-        chunks_dir,
-        f"chunk_{num_chunks - 1}.npz",
-    )
-    if os.path.exists(final_chunk_path):
+    final_chunk_path = chunks_dir / f"chunk_{num_chunks - 1}.npz"
+    if final_chunk_path.exists():
         logger.info(f"Final chunk already exists at {final_chunk_path}, skipping simulation.")
         return
 
-    pdb = PDBFile(pdb_path)
+    pdb = PDBFile(str(pdb_path))
     topology = pdb.getTopology()
     positions = pdb.getPositions(asNumpy=True)
 
@@ -112,7 +109,7 @@ def main(cfg: DictConfig) -> Optional[float]:
     logger.info(f"Platform name: {cfg.platform_name} properties: {platform_properties}")
     simulation.reporters.append(
         StateDataReporter(
-            os.path.join(cfg.output_dir, "output.txt"),
+            str(Path(cfg.output_dir) / "output.txt"),
             cfg.log_freq * cfg.frame_interval,
             step=True,
             potentialEnergy=True,
@@ -127,7 +124,7 @@ def main(cfg: DictConfig) -> Optional[float]:
     )
 
     # Determine starting chunk and initialize simulation
-    found_chunk_files = os.listdir(chunks_dir)
+    found_chunk_files = list(chunks_dir.iterdir())
     start_chunk = 0
 
     if found_chunk_files:
@@ -140,9 +137,10 @@ def main(cfg: DictConfig) -> Optional[float]:
         logger.info("Found existing trajectory chunks, loading previous chunk as checkpoint...")
 
         chunk_indexes = []
-        for filename in found_chunk_files:
+        for filepath in found_chunk_files:
+            filename = filepath.name
             if filename.startswith("chunk_"):
-                chunk_index = os.path.basename(filename).split("_")[-1][:-4]  # remove '.npz'
+                chunk_index = filename.split("_")[-1][:-4]  # remove '.npz'
                 assert chunk_index.isdigit(), f"Unexpected chunk filename format: {filename}"
                 chunk_indexes.append(int(chunk_index))
         if not chunk_indexes:
@@ -156,7 +154,7 @@ def main(cfg: DictConfig) -> Optional[float]:
         start_chunk = last_chunk_idx + 1
 
         # Load positions and velocities from the last saved chunk
-        chunk_filename = os.path.join(chunks_dir, f"chunk_{last_chunk_idx}.npz")
+        chunk_filename = chunks_dir / f"chunk_{last_chunk_idx}.npz"
         data = np.load(chunk_filename)
         pos = data["positions"][-1]
         vel = data["velocities"][-1]
@@ -200,14 +198,15 @@ def main(cfg: DictConfig) -> Optional[float]:
         # NOTE: We had issues with loading checkpoints on different devices,
         # Hence when resuming simply load the positions and velocities from the last saved chunk.
         # These are left here for completeness and in case someone wants to use them in the future.
-        simulation.saveCheckpoint(os.path.join(cfg.output_dir, "checkpoint.chk"))
-        simulation.saveState(os.path.join(cfg.output_dir, "state.xml"))
-        with open(f"{cfg.output_dir}/system.xml", "w") as output:
+        simulation.saveCheckpoint(str(Path(cfg.output_dir) / "checkpoint.chk"))
+        simulation.saveState(str(Path(cfg.output_dir) / "state.xml"))
+        system_xml_path = Path(cfg.output_dir) / "system.xml"
+        with system_xml_path.open("w") as output:
             output.write(XmlSerializer.serialize(system))
 
         # Save the chunk to npz files.
         chunk_filename = f"chunk_{chunk_idx}.npz"
-        chunk_path = os.path.join(chunks_dir, chunk_filename)
+        chunk_path = chunks_dir / chunk_filename
         chunk_positions = np.array(chunk_positions, dtype=np.float32)
         chunk_velocities = np.array(chunk_velocities, dtype=np.float32)
         np.savez_compressed(chunk_path, positions=chunk_positions, velocities=chunk_velocities)
