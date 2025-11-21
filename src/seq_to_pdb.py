@@ -128,7 +128,7 @@ def make_peptide_with_tleap(three_letter_seq, save_path):
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="seq_to_pdb.yaml")
-def main(cfg: DictConfig) -> None:
+def seq_to_pdb(cfg: DictConfig) -> None:
     pdb_dir = Path(cfg.paths.data_dir) / "pdbs"
     pdb_dir.mkdir(parents=True, exist_ok=True)
 
@@ -142,4 +142,4 @@ def main(cfg: DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    main()
+    seq_to_pdb()

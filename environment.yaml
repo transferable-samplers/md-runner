@@ -38,3 +38,4 @@ dependencies:
       - flake8
       - isort
       - hydra-submitit-launcher
+      - pytest-xdist

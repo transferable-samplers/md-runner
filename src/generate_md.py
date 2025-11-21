@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="generate_md.yaml")
-def main(cfg: DictConfig) -> Optional[float]:
+def generate_md(cfg: DictConfig) -> Optional[float]:
     assert cfg.pdb_filename is not None, "pdb_filename must be specified in the config"
     assert cfg.frame_interval > 0
     assert cfg.frames_per_chunk > 0
@@ -214,4 +214,4 @@ def main(cfg: DictConfig) -> Optional[float]:
 
 
 if __name__ == "__main__":
-    main()
+    generate_md()
