@@ -5,13 +5,16 @@ Tests for seq_to_pdb.py - generating PDB files from sequences.
 from pathlib import Path
 
 import pytest
+<<<<<<< HEAD
+=======
+from conftest import TEST_SEQUENCE
+>>>>>>> 36f676f7857ea19203b246fb07f77ab7eb767697
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
 from src.seq_to_pdb import seq_to_pdb
 from tests.helpers.utils import compose_config
 
-TEST_SEQUENCE = "PYA"
 
 
 @pytest.fixture(scope="session")
@@ -39,6 +42,7 @@ def cfg_test_seq_to_pdb(shared_tmp_path: Path) -> DictConfig:
     yield cfg
 
     GlobalHydra.instance().clear()
+
 
 @pytest.mark.forked  # prevents OpenMM/tLEaP issues
 def test_seq_to_pdb(cfg_test_seq_to_pdb: DictConfig) -> None:

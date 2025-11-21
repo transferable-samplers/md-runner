@@ -1,37 +1,40 @@
-# MD Runner Tool
+# MD Runner
 
-This codebase is the toolkit used to generate the ManyPeptidesMD dataset, in our work Amortized Sampling with Transferable Normalizing Flows.
+**MD Runner** is the molecular-dynamics toolkit used to generate the **ManyPeptidesMD** dataset introduced in our paper:
+[**Amortized Sampling with Transferable Normalizing Flows**](https://arxiv.org/abs/2508.18175)
 
-The codebase was adapted from the TimeWarp [codebase](https://github.com/microsoft/timewarp)
+The codebase builds on and extends the MD simulation provided in [**TimeWarp**](https://github.com/microsoft/timewarp).
 
-## Install
+## Installation
 
 ```bash
 micromamba env create -f environment.yaml
 micromamba activate md-runner
 ```
 
-## Steps
+## Workflow
 
-### 1. Generate PDB Files from Sequences
+### 1. Generate Initial PDB Structures from Sequences
 
-We use `tLEaP` via `ambertools` to generate PDB files with initial conformations. Run the `seq_to_pdb.py` script to convert sequences into PDB files:
+We use **tLEaP** (AmberTools) to construct peptide initial conformations from amino-acid sequences.
+
+To convert a set of sequences into PDB files:
 
 ```bash
-python python src/seq_to_pdb.py seq_filename=sequences/example_sequences.txt
+python src/seq_to_pdb.py seq_filename=sequences/example_sequences.txt
 ```
 
 ### 2. Run Molecular Dynamics Simulations (Local)
 
-Test / benchmark the MD simulation with the following command:
+You can perform a local test/benchmark MD simulation using:
 
 ```bash
 python src/generate_md.py pdb_filename=AA
 ```
 
-### 2. Run Molecular Dynamics Simulations (SLURM)
+### 3. Run Molecular Dynamics Simulations (SLURM)
 
-Use the generated PDB files to run molecular dynamics simulations with `generate_md.py`. Copy and string-ify the sequences from the sequences.txt and list them off in the sequences arg in `scripts/run-md.py`.
+For large-scale dataset generation, use the [hydra-submitit-launcher](https://hydra.cc/docs/plugins/submitit_launcher/) plug-in. An example script is provide in:
 
 ```bash
 ./scripts/run-md.py

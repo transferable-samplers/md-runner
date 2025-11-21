@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from conftest import TEST_SEQUENCE
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
@@ -17,10 +18,8 @@ from tests.helpers.utils import compose_config
 report_dir = os.environ.get("PYTEST_REPORT_DIR", "tests/")
 Path(report_dir).mkdir(parents=True, exist_ok=True)
 
-TEST_SEQUENCE = "PYA"
 
-
-@pytest.fixture()
+@pytest.fixture
 def cfg_test_generate_md(shared_tmp_path: Path, dir_with_pdb: Path) -> DictConfig:
     """
     Hydra-composed config for generate_md tests.
@@ -204,6 +203,7 @@ def check_chunks(
 
     check_contiguous_arrays(positions_list)
     check_contiguous_arrays(velocities_list)
+
 
 @pytest.mark.forked  # prevents OpenMM issues
 def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
