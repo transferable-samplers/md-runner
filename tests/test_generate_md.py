@@ -1,5 +1,5 @@
 """
-Tests for seq_to_pdb.py - generating PDB files from sequences.
+Tests for generate_md.py - generating MD simulation data.
 """
 
 import os
@@ -15,36 +15,30 @@ from tests.helpers.utils import compose_config
 
 # Create report directory if it doesn't exist
 report_dir = os.environ.get("PYTEST_REPORT_DIR", "tests/")
-os.makedirs(report_dir, exist_ok=True)
+Path(report_dir).mkdir(parents=True, exist_ok=True)
+
+TEST_SEQUENCE = "PYA"
 
 
-@pytest.fixture(scope="function")
-def cfg_test_generate_md(shared_tmp_path: Path, cfg_test_seq_to_pdb: DictConfig) -> DictConfig:
+@pytest.fixture()
+def cfg_test_generate_md(shared_tmp_path: Path, dir_with_pdb: Path) -> DictConfig:
     """
     Hydra-composed config for generate_md tests.
-    Uses the shared tmp_path where PDB files are already generated.
-
-    Note: Depends on cfg_test_seq_to_pdb to ensure PDB files are generated first.
+    Uses explicitly generated PDB files from dir_with_pdb fixture.
 
     Args:
-        shared_tmp_path: Module-scoped temporary directory path with PDB files.
-        cfg_test_seq_to_pdb: Config fixture that generates PDB files (ensures it runs first).
+        shared_tmp_path: Session-scoped temporary directory path for test artifacts.
+        dir_with_pdb: Path to directory containing generated PDB files.
 
     Returns:
         DictConfig: Composed and patched Hydra config for the test.
     """
-    # Important: clear Hydra before initializing
     GlobalHydra.instance().clear()
-
-    test_sequence = cfg_test_seq_to_pdb.seq_name
-
-    # PDB files are already in shared_tmp_path from cfg_test_seq_to_pdb fixture
-    pdb_dir = shared_tmp_path / "data" / "pdbs"
 
     cfg = compose_config(
         config_name="generate_md",
         overrides=[
-            f"pdb_filename={test_sequence}",  # Use AA sequence from example_sequences.txt
+            f"pdb_filename={TEST_SEQUENCE}",
             "platform=cpu",  # Use CPU for tests to avoid GPU requirements
         ],
     )
@@ -53,8 +47,8 @@ def cfg_test_generate_md(shared_tmp_path: Path, cfg_test_seq_to_pdb: DictConfig)
     with open_dict(cfg):
         cfg.paths.data_dir = str(shared_tmp_path / "data")
         cfg.paths.log_dir = str(shared_tmp_path / "logs")
-        cfg.paths.work_dir = os.getcwd()
-        cfg.pdb_dir = str(pdb_dir)
+        cfg.paths.work_dir = str(Path.cwd())
+        cfg.pdb_dir = str(dir_with_pdb)
         cfg.frame_interval = 1000  # Must be large enough for possible inter-chunk discontinuities
         cfg.frames_per_chunk = 5  # Small chunk size for testing
         cfg.warmup_steps = 10_000  # Reduced warmup for faster tests
@@ -62,7 +56,6 @@ def cfg_test_generate_md(shared_tmp_path: Path, cfg_test_seq_to_pdb: DictConfig)
 
     yield cfg
 
-    # Cleanup for next param
     GlobalHydra.instance().clear()
 
 
@@ -70,8 +63,8 @@ def check_chunk_indexes(chunk_files: list[Path]) -> None:
     # Verify chunk file indices are integer and contiguous
     try:
         indices = [int(p.stem.split("_")[-1]) for p in chunk_files]
-    except ValueError:
-        raise AssertionError("Chunk filename(s) do not follow pattern 'chunk_<index>.npz'")
+    except ValueError as err:
+        raise AssertionError("Chunk filename(s) do not follow pattern 'chunk_<index>.npz'") from err
 
     # Ensure sorted order and uniqueness
     if indices != sorted(indices):
@@ -159,9 +152,6 @@ def check_chunks(chunk_files: list[Path], time_per_frame: float, expected_time_l
 
     check_contiguous_arrays(positions_list)
     check_contiguous_arrays(velocities_list)
-
-    print("passeed")
-
 
 @pytest.mark.forked  # prevents OpenMM issues
 def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
