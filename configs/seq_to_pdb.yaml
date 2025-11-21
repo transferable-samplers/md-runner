@@ -3,9 +3,6 @@
 # specify here default configuration
 # order of defaults determines the order in which configs override each other
 defaults:
-  - _self_
-  - launcher: null
   - paths: default
-  - optional local: mila
-
+task_name: seq_to_pdb
 seq_filename: null

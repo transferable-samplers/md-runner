@@ -3,13 +3,12 @@
 # specify here default configuration
 # order of defaults determines the order in which configs override each other
 defaults:
-  - _self_
   - launcher: null
-  - paths: default
   - platform: gpu
-  - optional local: default
+  - paths: default
 task_name: md
-pdb_dir: data/pdbs/
+# PDB files are stored in data_dir/pdbs/
+pdb_dir: ${paths.data_dir}/pdbs
 pdb_filename: A_capped
 temperature: 300
 warmup_steps: 5000
@@ -17,8 +16,8 @@ step_size: 10000
 num_steps: 100_000
 log_freq: 100
 ckpt_freq: 1000
-output_dir: ${paths.data_dir}/md/${pdb_filename}
+# Hydra outputs go to outputs_dir/md/ with run-specific subdirectories
 hydra:
   run:
-    dir: ${output_dir}
+    dir: ${paths.outputs_dir}/md
 output_filename: ${pdb_filename}_${temperature}_${num_steps}

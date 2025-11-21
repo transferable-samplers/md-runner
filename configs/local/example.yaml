@@ -1,5 +1,0 @@
-# @package _global_
-
-paths:
-  data_dir: ${oc.env:SCRATCH}/md-runner/data/
-  log_dir: ${oc.env:SCRATCH}/md-runner/logs/
