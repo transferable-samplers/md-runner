@@ -1,0 +1,22 @@
+# @package _global_
+
+# specify here default configuration
+# order of defaults determines the order in which configs override each other
+defaults:
+  - launcher: null
+  - platform: gpu
+  - paths: default
+  - hydra: default
+  - _self_
+task_name: generate_md
+pdb_dir: ${paths.data_dir}/pdbs
+output_dir: ${paths.data_dir}/md/${seq_name}_${temperature}_${frame_interval}_${frames_per_chunk}
+seq_name: null
+seq_filename: null
+seq_idx: null
+temperature: 310
+warmup_steps: 50_000 # How many integration steps to take before recording frames
+frame_interval: 1_000 # How many integration steps between recorded frames (each step is 1 fs)
+time_ns: 1.0 # Total simulation time in nanoseconds
+log_freq: 100 # How often to log simulation data (in integration steps)
+frames_per_chunk: 100 # How many frames to save at once, shape (frames_per_chunk, num_atoms, 3)

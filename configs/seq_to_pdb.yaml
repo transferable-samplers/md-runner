@@ -1,0 +1,11 @@
+# @package _global_
+
+# specify here default configuration
+# order of defaults determines the order in which configs override each other
+defaults:
+  - paths: default
+  - hydra: default
+  - _self_
+task_name: seq_to_pdb
+seq_filename: null
+seq_name: null

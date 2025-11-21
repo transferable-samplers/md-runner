@@ -5,13 +5,9 @@
 # - conda allows for installing packages without requiring certain compilers or
 #   libraries to be available in the system, since it installs precompiled binaries
 
-name:
-  md-runner
-
+name: md-runner
 
 channels:
-  - nvidia
-  - pytorch
   - conda-forge
   - defaults
 
@@ -25,10 +21,6 @@ channels:
 
 dependencies:
   - python=3.10
-  - pytorch=2.*
-  - torchvision
-  - lightning=2.*
-  - torchmetrics=0.*
   - hydra-core=1.*
   - rich=13.*
   - pre-commit=3.*
@@ -42,9 +34,8 @@ dependencies:
       - hydra-colorlog
       - rootutils
       - ipdb
-      - git+https://github.com/atong01/conditional-flow-matching.git
       - black
       - flake8
       - isort
-      - jupyter-black
       - hydra-submitit-launcher
+      - pytest-xdist
