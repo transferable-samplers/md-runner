@@ -10,7 +10,7 @@ defaults:
   - _self_
 task_name: generate_md
 pdb_dir: ${paths.data_dir}/pdbs
-output_dir: ${paths.data_dir}/md/${pdb_filename}_${temperature}K_${frame_interval}_${frames_per_chunk}
+output_dir: ${paths.data_dir}/md/${pdb_filename}_${temperature}_${frame_interval}_${frames_per_chunk}
 pdb_filename: null
 temperature: 310
 warmup_steps: 50_000 # How many integration steps to take before recording frames

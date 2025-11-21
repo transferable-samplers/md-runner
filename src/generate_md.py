@@ -27,6 +27,8 @@ import logging
 import os
 from typing import Optional
 
+import glob
+
 import hydra
 import numpy as np
 import openmm
@@ -37,8 +39,10 @@ from openmm import Platform, XmlSerializer
 from openmm.app import CheckpointReporter, ForceField, Simulation, StateDataReporter, PDBFile
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="generate_md.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
@@ -47,6 +51,13 @@ def main(cfg: DictConfig) -> Optional[float]:
     chunks_dir = os.path.join(cfg.output_dir, "chunks")
     os.makedirs(cfg.output_dir, exist_ok=True)
     os.makedirs(chunks_dir, exist_ok=True)
+
+    final_chunk_path = os.path.join(
+        chunks_dir, f"positions_{(cfg.num_frames - 1) // cfg.frames_per_chunk}.npz"
+    )
+    if os.path.exists(final_chunk_path):
+        logger.info(f"Chunks already exist at {chunks_dir}, skipping simulation.")
+        return
 
     pdb_path = os.path.join(cfg.pdb_dir, f"{cfg.pdb_filename}.pdb")
     pdb = PDBFile(pdb_path)
@@ -84,8 +95,6 @@ def main(cfg: DictConfig) -> Optional[float]:
         platform=platform,
         platformProperties=platform_properties,
     )
-    simulation.context.setPositions(positions)
-    simulation.minimizeEnergy()
     simulation.reporters.append(
         StateDataReporter(
             os.path.join(cfg.output_dir, "output.txt"),
@@ -101,26 +110,88 @@ def main(cfg: DictConfig) -> Optional[float]:
             append=True,
         )
     )
-    simulation.reporters.append(
-        CheckpointReporter(f"{cfg.output_dir}/checkpoint.chk", cfg.frame_interval)
-    )
-    logger.info("Minimized. running simulation...")
-    simulation.step(cfg.warmup_steps)
-    all_positions = []
-    for step in range(cfg.num_frames): # removed tqdm due to admin complaints about excessive unbuffered stdout
+
+    if glob.glob(os.path.join(cfg.output_dir, "chunks", "*.npz")):
+        logger.info("Found existing trajectory chunks, loading previous chunk as checkpoint...")
+        # NOTE: We had issues with loading checkpoints on different machines.
+        # Hence when resuming simply load the positions and velocities from the last saved chunk.
+        # This means the trajectories are not deterministic when resuming.
+        # If anyone wants to use the checkpoint files instead, they are still being saved every chunk.
+        # A PR for deterministic resuming would be welcome! :)
+
+        output_dir_path = os.path.join(cfg.output_dir, cfg.output_filename)
+        indices = []
+        for filename in os.listdir(output_dir_path):
+            if filename.startswith("positions_") and filename.endswith(".npz"):
+                name = filename[:-4].split("_")[-1]  # remove '.npz'
+                if name.isdigit():
+                    indices.append(int(name))
+        if not indices:
+            raise FileNotFoundError("No position .npz files with integer names found in the output directory.")
+        highest_index = max(indices)
+        highest_value = highest_index + 1
+        pos_filename = os.path.join(output_dir_path, f"positions_{highest_index}.npz")
+        vel_filename = os.path.join(output_dir_path, f"velocities_{highest_index}.npz")
+        pos = np.load(pos_filename)["all_positions"][-1]
+        vel = np.load(vel_filename)["all_velocities"][-1]
+        simulation.context.setPositions(pos * openmm.unit.nanometer)
+        simulation.context.setVelocities(vel * openmm.unit.nanometer/openmm.unit.picosecond)
+        simulation.context.setTime(highest_value * integrator.getStepSize() * cfg.step_size)
+        simulation.currentStep = highest_value * cfg.step_size + cfg.warmup_steps
+
+        current_step_md = simulation.currentStep
+        current_step_md = max(0, current_step_md - cfg.warmup_steps)
+        start_step = current_step_md // cfg.step_size
+        logger.info(f"Loaded checkpoint at step {start_step}. Resuming…")
+    else:
+        logger.info("No existing chunks found, starting new simulation...")
+        simulation.context.setPositions(positions)
+        simulation.minimizeEnergy()
+        logger.info("minimized. running warmup...")
+        simulation.step(cfg.warmup_steps)
+        logger.info(f"warmup done, ({cfg.warmup_steps} steps)")
+        start_step = 0
+
+    chunk_positions = []
+    chunk_velocities = []
+    logger.info(f"running simulation...")
+
+    for step in range(start_step, cfg.num_frames): # removed tqdm due to admin complaints about excessive unbuffered stdout
         simulation.step(cfg.frame_interval)
-        st = simulation.context.getState(getPositions=True)
+        st = simulation.context.getState(getPositions=True, getVelocities=True)
         coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
-        all_positions.append(coords)
-        if not (step + 1) % cfg.frames_per_chunk:
-            output_filename = f"chunk_{step // cfg.frames_per_chunk}.npz"
-            all_positions = np.array(all_positions, dtype=np.float32)
-            save_path = os.path.join(chunks_dir, output_filename)
-            logger.info(f"saving to {save_path} with shape {all_positions.shape}")
-            np.savez_compressed(save_path, all_positions=all_positions)
+        velocities = st.getVelocities(asNumpy=True).value_in_unit(openmm.unit.nanometer / openmm.unit.picosecond)
+        chunk_positions.append(coords)
+        chunk_velocities.append(velocities)
+
+        if not (step + 1) % cfg.frames_per_chunk or (step + 1) == cfg.num_frames:
+
+            # Save the state of the simulation
+            # NOTE: We had issues with loading checkpoints on different devices,
+            # Hence when resuming simply load the positions and velocities from the last saved chunk
+            # These are left here for completeness and in case someone wants to use them in the future
+            simulation.saveCheckpoint(os.path.join(cfg.output_dir, "checkpoint.chk"))
+            simulation.saveState(os.path.join(cfg.output_dir, "state.xml"))
             with open(f"{cfg.output_dir}/system.xml", "w") as output:
                 output.write(XmlSerializer.serialize(system))
-            all_positions = []
+
+            position_chunk_filename = f"positions_{step // cfg.frames_per_chunk}.npz"
+            velocity_chunk_filename = f"velocities_{step // cfg.frames_per_chunk}.npz"
+
+            position_chunk_path = os.path.join(chunks_dir, position_chunk_filename)
+            velocity_chunk_path = os.path.join(chunks_dir, velocity_chunk_filename)
+
+            chunk_positions = np.array(chunk_positions, dtype=np.float32)
+            chunk_velocities = np.array(chunk_velocities, dtype=np.float32)
+
+            logger.info(f"saving positions to {position_chunk_path} with shape {chunk_positions.shape}")
+            np.savez_compressed(position_chunk_path, positions=chunk_positions)
+            logger.info(f"saving velocities to {velocity_chunk_path} with shape {chunk_velocities.shape}")
+            np.savez_compressed(velocity_chunk_path, velocities=chunk_velocities)
+
+            chunk_positions = []
+            chunk_velocities = []
+
 
 if __name__ == "__main__":
     main()
