@@ -42,10 +42,13 @@ logger = logging.getLogger(__name__)
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="generate_md.yaml")
 def main(cfg: DictConfig) -> Optional[float]:
-    pdb_path = os.path.join(cfg.pdb_dir, f"{cfg.pdb_filename}.pdb")
 
+    assert cfg.pdb_filename is not None, "pdb_filename must be specified in the config"
+    chunks_dir = os.path.join(cfg.output_dir, "chunks")
     os.makedirs(cfg.output_dir, exist_ok=True)
+    os.makedirs(chunks_dir, exist_ok=True)
 
+    pdb_path = os.path.join(cfg.pdb_dir, f"{cfg.pdb_filename}.pdb")
     pdb = PDBFile(pdb_path)
     topology = pdb.getTopology()
     positions = pdb.getPositions(asNumpy=True)
@@ -109,17 +112,15 @@ def main(cfg: DictConfig) -> Optional[float]:
         st = simulation.context.getState(getPositions=True)
         coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
         all_positions.append(coords)
-        output_filename = f"{step}.npz"
-        if not (step + 1) % cfg.save_interval:
+        if not (step + 1) % cfg.frames_per_chunk:
+            output_filename = f"chunk_{step // cfg.frames_per_chunk}.npz"
             all_positions = np.array(all_positions, dtype=np.float32)
-            save_path = os.path.join(cfg.output_dir, cfg.output_filename, output_filename)
+            save_path = os.path.join(chunks_dir, output_filename)
             logger.info(f"saving to {save_path} with shape {all_positions.shape}")
-            os.makedirs(os.path.join(cfg.output_dir, cfg.output_filename), exist_ok=True)
             np.savez_compressed(save_path, all_positions=all_positions)
             with open(f"{cfg.output_dir}/system.xml", "w") as output:
                 output.write(XmlSerializer.serialize(system))
             all_positions = []
-
 
 if __name__ == "__main__":
     main()
