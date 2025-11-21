@@ -10,21 +10,20 @@ import pytest
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
-from tests.conftest import TEST_SEQUENCE
-from tests.helpers.utils import compose_config
-
 from src.generate_md import generate_md
+from tests.helpers.utils import compose_config
 
 # Create report directory if it doesn't exist
 report_dir = os.environ.get("PYTEST_REPORT_DIR", "tests/")
 os.makedirs(report_dir, exist_ok=True)
+
 
 @pytest.fixture(scope="function")
 def cfg_test_generate_md(shared_tmp_path: Path, cfg_test_seq_to_pdb: DictConfig) -> DictConfig:
     """
     Hydra-composed config for generate_md tests.
     Uses the shared tmp_path where PDB files are already generated.
-    
+
     Note: Depends on cfg_test_seq_to_pdb to ensure PDB files are generated first.
 
     Args:
@@ -56,73 +55,113 @@ def cfg_test_generate_md(shared_tmp_path: Path, cfg_test_seq_to_pdb: DictConfig)
         cfg.paths.log_dir = str(shared_tmp_path / "logs")
         cfg.paths.work_dir = os.getcwd()
         cfg.pdb_dir = str(pdb_dir)
-        cfg.frame_interval = 1  # 1 fs between frames
-        cfg.frames_per_chunk = 100  # Small chunks for testing
+        cfg.frame_interval = 1000  # Must be large enough for possible inter-chunk discontinuities
+        cfg.frames_per_chunk = 5  # Small chunk size for testing
         cfg.warmup_steps = 10_000  # Reduced warmup for faster tests
-        cfg.time_ns = 0.001
+        cfg.time_ns = 0.050  # Must be large enough to get multiple chunks
 
     yield cfg
 
     # Cleanup for next param
     GlobalHydra.instance().clear()
 
-def check_contiguous_arrays(array_list: list[np.ndarray]) -> None:
 
-    # Check that chunks form a contiguous sequence
-    if len(array_list) > 1:
-        # Calculate typical displacement between consecutive frames for comparison
-        # Use the first chunk to establish baseline
-        all_consecutive_displacements = []
-        for chunk_positions in array_list:
-            # Calculate displacement between consecutive frames within chunk
-            for frame_idx in range(chunk_positions.shape[0] - 1):
-                displacement = np.linalg.norm(
-                    chunk_positions[frame_idx + 1] - chunk_positions[frame_idx], axis=-1
-                )
-                all_consecutive_displacements.extend(displacement)
+def check_chunk_indexes(chunk_files: list[Path]) -> None:
+    # Verify chunk file indices are integer and contiguous
+    try:
+        indices = [int(p.stem.split("_")[-1]) for p in chunk_files]
+    except ValueError:
+        raise AssertionError("Chunk filename(s) do not follow pattern 'chunk_<index>.npz'")
 
-        breakpoint()
-        
-        typical_displacement = np.median(all_consecutive_displacements)
-        
-        # Check displacement across chunk boundaries
-        for i in range(len(array_list) - 1):
-            last_frame_prev = array_list[i][-1]  # Last frame of chunk i
-            first_frame_next = array_list[i + 1][0]  # First frame of chunk i+1
-            
-            # Calculate the displacement between consecutive frames (across chunk boundary)
-            boundary_displacement = np.linalg.norm(first_frame_next - last_frame_prev, axis=-1)
-            max_boundary_displacement = np.max(boundary_displacement)
-            
-            # The displacement across chunk boundaries should be similar to typical within-chunk displacements
-            # If there's a discontinuity (e.g., simulation was restarted), the displacement would be much larger
-            # Allow 20x tolerance to account for occasional large movements, but catch major discontinuities
-            assert max_boundary_displacement < typical_displacement * 1.5, (
-                f"Chunk {i} and {i+1} are not contiguous: "
-                "Dispalce"
+    # Ensure sorted order and uniqueness
+    if indices != sorted(indices):
+        raise AssertionError("Chunk files are not sorted by index")
+    if len(set(indices)) != len(indices):
+        raise AssertionError("Duplicate chunk indices found")
+
+    start = indices[0]
+    expected = list(range(start, start + len(indices)))
+    if indices != expected:
+        missing = sorted(set(expected) - set(indices))
+        extra = sorted(set(indices) - set(expected))
+        parts = []
+        if missing:
+            parts.append(f"missing indices {missing}")
+        if extra:
+            parts.append(f"unexpected indices {extra}")
+        raise AssertionError("Chunk indices are not contiguous: " + "; ".join(parts))
 
 
-                f"max displacement across boundary = {max_boundary_displacement:.6f}, "
-                f"typical displacement = {typical_displacement:.6f}"
-            )
- 
-def check_chunks(chunk_dir: Path):
+def check_contiguous_arrays(array_list: list[np.ndarray], alpha: float = 2) -> None:
+    # Calculate typical displacement between consecutive frames for comparison
+    all_consecutive_displacements = []
+    for chunk_array in array_list:
+        # chunk_positions: shape (num_frames, num_points, dim)
+        for frame_idx in range(chunk_array.shape[0] - 1):
+            # Flatten frames so distance is not pointwise, but global
+            f0 = chunk_array[frame_idx].reshape(-1)
+            f1 = chunk_array[frame_idx + 1].reshape(-1)
 
+            # Euclidean distance between full frames
+            frame_dist = np.linalg.norm(f1 - f0)
+
+            all_consecutive_displacements.append(frame_dist)
+
+    typical_displacement = np.median(all_consecutive_displacements)
+
+    # Check displacement across chunk boundaries
+    for i in range(len(array_list) - 1):
+        last_frame_prev = array_list[i][-1]  # Last frame of chunk i
+        first_frame_next = array_list[i + 1][0]  # First frame of chunk i+1
+
+        # Flatten frames for global distance
+        f0 = last_frame_prev.reshape(-1)
+        f1 = first_frame_next.reshape(-1)
+
+        boundary_dist = np.linalg.norm(f1 - f0)
+        assert boundary_dist < alpha * typical_displacement, (
+            f"Non-contiguous frames detected between chunks {i} and {i + 1}: "
+            f"distance {boundary_dist:.3f} exceeds threshold of {alpha * typical_displacement:.3f}."
+        )
+
+
+def check_chunks(chunk_files: list[Path], time_per_frame: float, expected_time_length_ns: float) -> None:
     positions_list = []
     velocities_list = []
-    chunk_files = list(chunk_dir.glob("chunk_*.npz"))
+    assert len(chunk_files) > 1, "Cannot thoroughly check chunks with <= 1 chunk file."
+
     # Sort chunk files by numeric index in filename: chunk_<index>.npz
     chunk_files.sort(key=lambda p: int(p.stem.split("_")[-1]))
+
+    check_chunk_indexes(chunk_files)  # Verify chunk file indices are formatted correctly and contiguous
+
+    total_frames = 0
     for chunk_file in chunk_files:
         chunk_data = np.load(chunk_file)
         assert "positions" in chunk_data, "Chunk missing positions"
         assert "velocities" in chunk_data, "Chunk missing velocities"
         assert chunk_data["positions"].shape[0] > 0, "Chunk has no position frames"
         assert chunk_data["velocities"].shape[0] > 0, "Chunk has no velocity frames"
+        assert chunk_data["positions"].shape == chunk_data["velocities"].shape, (
+            "Positions and velocities shape mismatch in chunk"
+        )
         positions_list.append(chunk_data["positions"])
         velocities_list.append(chunk_data["velocities"])
+
+        frames_in_chunk = chunk_data["positions"].shape[0]
+        print(frames_in_chunk)
+        total_frames += frames_in_chunk
+
+    assert np.isclose(
+        total_frames * time_per_frame,
+        expected_time_length_ns,
+    )
+
     check_contiguous_arrays(positions_list)
     check_contiguous_arrays(velocities_list)
+
+    print("passeed")
+
 
 @pytest.mark.forked  # prevents OpenMM issues
 def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
@@ -142,7 +181,10 @@ def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
     chunk_files = list(chunks_dir.glob("chunk_*.npz"))
     assert len(chunk_files) > 0, "No chunk files created"
 
-    check_chunks(chunks_dir) # Ensure chunks can be collated without errors
+    check_chunks(
+        chunk_files, cfg_test_generate_md.frame_interval / 1e6, cfg_test_generate_md.time_ns
+    )  # Ensure chunks can be collated without errors
+
 
 @pytest.mark.forked  # prevents OpenMM issues
 def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
@@ -157,9 +199,22 @@ def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
 
     generate_md(cfg_test_generate_md)
 
-    cfg_test_generate_md.time_ns += 0.001  # Extend simulation by another 1 ps
+    chunks_dir = Path(cfg_test_generate_md.output_dir) / "chunks"
+    assert chunks_dir.exists(), "Chunks directory not created"
+
+    chunk_files = list(chunks_dir.glob("chunk_*.npz"))
+    assert len(chunk_files) > 0, "No chunk files created before resuming"
+
+    check_chunks(
+        chunk_files, cfg_test_generate_md.frame_interval / 1e6, cfg_test_generate_md.time_ns
+    )  # Ensure chunks can be collated without errors before resuming
+
+    cfg_test_generate_md.time_ns *= 2  # Double simulation time to force resuming
     generate_md(cfg_test_generate_md)
 
-    chunks_dir = Path(cfg_test_generate_md.output_dir) / "chunks"
+    chunk_files = list(chunks_dir.glob("chunk_*.npz"))
+    assert len(chunk_files) > 0, "No chunk files created after resuming"
 
-    check_chunks(chunks_dir)  # Ensure chunks can be collated without errors
+    check_chunks(
+        chunk_files, cfg_test_generate_md.frame_interval / 1e6, cfg_test_generate_md.time_ns
+    )  # Ensure chunks can be collated without errors after resuming
