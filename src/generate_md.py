@@ -25,7 +25,6 @@ CPU
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
 
 import hydra
 import numpy as np
@@ -42,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 @hydra.main(version_base="1.3", config_path="../configs", config_name="generate_md.yaml")
-def generate_md(cfg: DictConfig) -> None:
+def generate_md(cfg: DictConfig) -> None:  # noqa: C901
     """
     Generate molecular dynamics simulation data from a PDB file.
 
@@ -51,7 +50,7 @@ def generate_md(cfg: DictConfig) -> None:
 
     Args:
         cfg: Hydra configuration dictionary containing:
-            - pdb_filename: Name of the PDB file (without .pdb extension)
+            - seq_name: Name of the sequence
             - pdb_dir: Directory containing PDB files
             - output_dir: Directory to save simulation output
             - temperature: Simulation temperature in Kelvin
@@ -66,12 +65,22 @@ def generate_md(cfg: DictConfig) -> None:
     Returns:
         None: Function exits early if final chunk already exists.
     """
-    assert cfg.pdb_filename is not None, "pdb_filename must be specified in the config"
+
     assert cfg.frame_interval > 0
     assert cfg.frames_per_chunk > 0
     assert cfg.time_ns > 0
 
-    pdb_path = Path(cfg.pdb_dir) / f"{cfg.pdb_filename}.pdb"
+    assert cfg.get("pdb_dir") is not None or (cfg.get("seq_filename") is not None and cfg.get("seq_idx") is not None), (
+        "Either 'pdb_dir' or both 'seq_filename' and 'seq_idx' must be specified in the config"
+    )
+
+    if cfg.get("seq_name") is not None:
+        pdb_path = Path(cfg.pdb_dir) / f"{cfg.seq_name}.pdb"
+    else:
+        with Path(cfg.seq_filename).open() as f:
+            sequences = f.read().strip().splitlines()
+        sequence = sequences[cfg.seq_idx]
+        pdb_path = Path(cfg.pdb_dir) / f"{sequence}.pdb"
 
     # Calculate number of frames from time period
     # Each integration step is 1 fs, frame_interval steps between frames
@@ -214,7 +223,7 @@ def generate_md(cfg: DictConfig) -> None:
             st = simulation.context.getState(getPositions=True, getVelocities=True)
             coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
             velocities = st.getVelocities(asNumpy=True).value_in_unit(
-                openmm.unit.nanometer / openmm.unit.picosecond
+                openmm.unit.nanometer / openmm.unit.picosecond,
             )
             chunk_positions.append(coords)
             chunk_velocities.append(velocities)

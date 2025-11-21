@@ -29,7 +29,7 @@ python src/seq_to_pdb.py seq_filename=sequences/example_sequences.txt
 You can perform a local test/benchmark MD simulation using:
 
 ```bash
-python src/generate_md.py pdb_filename=AA
+python src/generate_md.py seq_name=AA
 ```
 
 ### 3. Run Molecular Dynamics Simulations (SLURM)

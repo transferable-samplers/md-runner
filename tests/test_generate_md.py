@@ -37,7 +37,7 @@ def cfg_test_generate_md(shared_tmp_path: Path, dir_with_pdb: Path) -> DictConfi
     cfg = compose_config(
         config_name="generate_md",
         overrides=[
-            f"pdb_filename={TEST_SEQUENCE}",
+            f"seq_name={TEST_SEQUENCE}",
             "platform=cpu",  # Use CPU for tests to avoid GPU requirements
         ],
     )
