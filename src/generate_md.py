@@ -111,38 +111,40 @@ def main(cfg: DictConfig) -> Optional[float]:
         )
     )
 
-    if glob.glob(os.path.join(cfg.output_dir, "chunks", "*.npz")):
-        logger.info("Found existing trajectory chunks, loading previous chunk as checkpoint...")
+    found_chunk_files = os.listdir(chunks_dir)
+
+    if found_chunk_files:
         # NOTE: We had issues with loading checkpoints on different machines.
         # Hence when resuming simply load the positions and velocities from the last saved chunk.
         # This means the trajectories are not deterministic when resuming.
         # If anyone wants to use the checkpoint files instead, they are still being saved every chunk.
         # A PR for deterministic resuming would be welcome! :)
 
-        output_dir_path = os.path.join(cfg.output_dir, cfg.output_filename)
-        indices = []
-        for filename in os.listdir(output_dir_path):
-            if filename.startswith("positions_") and filename.endswith(".npz"):
-                name = filename[:-4].split("_")[-1]  # remove '.npz'
-                if name.isdigit():
-                    indices.append(int(name))
-        if not indices:
-            raise FileNotFoundError("No position .npz files with integer names found in the output directory.")
-        highest_index = max(indices)
+        logger.info("Found existing trajectory chunks, loading previous chunk as checkpoint...")
+
+        chunk_indexes = []
+        for filename in found_chunk_files:
+            if filename.startswith("positions_"):
+                chunk_index = os.path.basename(filename).split("_")[-1][:-4]  # remove '.npz'
+                assert chunk_index.isdigit(), f"Unexpected chunk filename format: {filename}"
+                assert filename.replace("positions_", "velocities_") in found_chunk_files, f"Missing corresponding velocities chunk for {filename}"
+                chunk_indexes.append(int(chunk_index))
+        if not chunk_indexes:
+            raise FileNotFoundError("Found npz files but none matched expected chunk filename format.")
+        highest_index = max(chunk_indexes)
         highest_value = highest_index + 1
-        pos_filename = os.path.join(output_dir_path, f"positions_{highest_index}.npz")
-        vel_filename = os.path.join(output_dir_path, f"velocities_{highest_index}.npz")
-        pos = np.load(pos_filename)["all_positions"][-1]
-        vel = np.load(vel_filename)["all_velocities"][-1]
+        pos_filename = os.path.join(chunks_dir, f"positions_{highest_index}.npz")
+        vel_filename = os.path.join(chunks_dir, f"velocities_{highest_index}.npz")
+        pos = np.load(pos_filename)["positions"][-1]
+        vel = np.load(vel_filename)["velocities"][-1]
         simulation.context.setPositions(pos * openmm.unit.nanometer)
         simulation.context.setVelocities(vel * openmm.unit.nanometer/openmm.unit.picosecond)
-        simulation.context.setTime(highest_value * integrator.getStepSize() * cfg.step_size)
-        simulation.currentStep = highest_value * cfg.step_size + cfg.warmup_steps
-
+        simulation.context.setTime(highest_value * integrator.getStepSize() * cfg.frame_interval)
+        simulation.currentStep = highest_value * cfg.frame_interval + cfg.warmup_steps
         current_step_md = simulation.currentStep
         current_step_md = max(0, current_step_md - cfg.warmup_steps)
-        start_step = current_step_md // cfg.step_size
-        logger.info(f"Loaded checkpoint at step {start_step}. Resuming…")
+        start_step = current_step_md // cfg.frame_interval
+        logger.info(f"Loaded checkpoint at chunk {start_step}. Resuming…")
     else:
         logger.info("No existing chunks found, starting new simulation...")
         simulation.context.setPositions(positions)
