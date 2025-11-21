@@ -27,16 +27,13 @@ import logging
 import os
 from typing import Optional
 
-import glob
-
 import hydra
 import numpy as np
 import openmm
 import rootutils
-import tqdm
 from omegaconf import DictConfig
 from openmm import Platform, XmlSerializer
-from openmm.app import CheckpointReporter, ForceField, Simulation, StateDataReporter, PDBFile
+from openmm.app import ForceField, Simulation, StateDataReporter, PDBFile
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
@@ -48,12 +45,19 @@ logger = logging.getLogger(__name__)
 def main(cfg: DictConfig) -> Optional[float]:
 
     assert cfg.pdb_filename is not None, "pdb_filename must be specified in the config"
+    
+    # Calculate number of frames from time period
+    # Each integration step is 1 fs, frame_interval steps between frames
+    # time_ns * 1e6 fs/ns = total time in fs = num_frames * frame_interval
+    num_frames = int(cfg.time_ns * 1e6 / cfg.frame_interval)
+    logger.info(f"Calculated {num_frames} frames for {cfg.time_ns}ns simulation time")
+    
     chunks_dir = os.path.join(cfg.output_dir, "chunks")
     os.makedirs(cfg.output_dir, exist_ok=True)
     os.makedirs(chunks_dir, exist_ok=True)
 
     final_chunk_path = os.path.join(
-        chunks_dir, f"positions_{(cfg.num_frames - 1) // cfg.frames_per_chunk}.npz"
+        chunks_dir, f"positions_{(num_frames - 1) // cfg.frames_per_chunk}.npz"
     )
     if os.path.exists(final_chunk_path):
         logger.info(f"Chunks already exist at {chunks_dir}, skipping simulation.")
@@ -85,8 +89,8 @@ def main(cfg: DictConfig) -> Optional[float]:
     logger.info(f"Platform name: {cfg.platform_name} {platform_properties}")
     logger.info(f"Simulating system {pdb_path} at {cfg.temperature}K")
     logger.info(f"Interval between saved frames: {cfg.frame_interval}fs")
-    logger.info(f"Number of frames to generate: {cfg.num_frames}")
-    logger.info(f"Total simulation time: {cfg.num_frames * cfg.frame_interval / 1e6} microseconds")
+    logger.info(f"Number of frames to generate: {num_frames}")
+    logger.info(f"Total simulation time: {cfg.time_ns}ns")
     platform = Platform.getPlatform(cfg.platform_name)
     simulation = Simulation(
         topology,
@@ -103,7 +107,7 @@ def main(cfg: DictConfig) -> Optional[float]:
             potentialEnergy=True,
             temperature=True,
             progress=True,
-            totalSteps=cfg.num_frames * cfg.frame_interval,
+            totalSteps=num_frames * cfg.frame_interval,
             remainingTime=True,
             speed=True,
             elapsedTime=True,
@@ -111,7 +115,12 @@ def main(cfg: DictConfig) -> Optional[float]:
         )
     )
 
+    # Calculate number of chunks needed
+    num_chunks = (num_frames + cfg.frames_per_chunk - 1) // cfg.frames_per_chunk
+
+    # Determine starting chunk and initialize simulation
     found_chunk_files = os.listdir(chunks_dir)
+    start_chunk = 0
 
     if found_chunk_files:
         # NOTE: We had issues with loading checkpoints on different machines.
@@ -131,20 +140,24 @@ def main(cfg: DictConfig) -> Optional[float]:
                 chunk_indexes.append(int(chunk_index))
         if not chunk_indexes:
             raise FileNotFoundError("Found npz files but none matched expected chunk filename format.")
-        highest_index = max(chunk_indexes)
-        highest_value = highest_index + 1
-        pos_filename = os.path.join(chunks_dir, f"positions_{highest_index}.npz")
-        vel_filename = os.path.join(chunks_dir, f"velocities_{highest_index}.npz")
+        
+        last_chunk_idx = max(chunk_indexes)
+        start_chunk = last_chunk_idx + 1
+        
+        # Load positions and velocities from the last saved chunk
+        pos_filename = os.path.join(chunks_dir, f"positions_{last_chunk_idx}.npz")
+        vel_filename = os.path.join(chunks_dir, f"velocities_{last_chunk_idx}.npz")
         pos = np.load(pos_filename)["positions"][-1]
         vel = np.load(vel_filename)["velocities"][-1]
         simulation.context.setPositions(pos * openmm.unit.nanometer)
-        simulation.context.setVelocities(vel * openmm.unit.nanometer/openmm.unit.picosecond)
-        simulation.context.setTime(highest_value * integrator.getStepSize() * cfg.frame_interval)
-        simulation.currentStep = highest_value * cfg.frame_interval + cfg.warmup_steps
-        current_step_md = simulation.currentStep
-        current_step_md = max(0, current_step_md - cfg.warmup_steps)
-        start_step = current_step_md // cfg.frame_interval
-        logger.info(f"Loaded checkpoint at chunk {start_step}. Resuming…")
+        simulation.context.setVelocities(vel * openmm.unit.nanometer / openmm.unit.picosecond)
+        
+        # Set simulation state to continue from where we left off
+        frames_completed = start_chunk * cfg.frames_per_chunk
+        simulation.context.setTime(frames_completed * integrator.getStepSize() * cfg.frame_interval)
+        simulation.currentStep = frames_completed * cfg.frame_interval + cfg.warmup_steps
+        
+        logger.info(f"Resuming from chunk {start_chunk} (frame {frames_completed})...")
     else:
         logger.info("No existing chunks found, starting new simulation...")
         simulation.context.setPositions(positions)
@@ -152,47 +165,48 @@ def main(cfg: DictConfig) -> Optional[float]:
         logger.info("minimized. running warmup...")
         simulation.step(cfg.warmup_steps)
         logger.info(f"warmup done, ({cfg.warmup_steps} steps)")
-        start_step = 0
 
-    chunk_positions = []
-    chunk_velocities = []
-    logger.info(f"running simulation...")
+    logger.info(f"Running simulation: {num_chunks} chunks, starting from chunk {start_chunk}...")
 
-    for step in range(start_step, cfg.num_frames): # removed tqdm due to admin complaints about excessive unbuffered stdout
-        simulation.step(cfg.frame_interval)
-        st = simulation.context.getState(getPositions=True, getVelocities=True)
-        coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
-        velocities = st.getVelocities(asNumpy=True).value_in_unit(openmm.unit.nanometer / openmm.unit.picosecond)
-        chunk_positions.append(coords)
-        chunk_velocities.append(velocities)
+    # Outer loop: iterate over chunks
+    for chunk_idx in range(start_chunk, num_chunks):
+        # Calculate how many frames are in this chunk
+        frames_in_chunk = min(cfg.frames_per_chunk, num_frames - chunk_idx * cfg.frames_per_chunk)
+        
+        chunk_positions = []
+        chunk_velocities = []
+        
+        # Inner loop: iterate over frames within this chunk
+        for frame_in_chunk in range(frames_in_chunk):
+            simulation.step(cfg.frame_interval)
+            st = simulation.context.getState(getPositions=True, getVelocities=True)
+            coords = st.getPositions(asNumpy=True) / openmm.unit.nanometer
+            velocities = st.getVelocities(asNumpy=True).value_in_unit(openmm.unit.nanometer / openmm.unit.picosecond)
+            chunk_positions.append(coords)
+            chunk_velocities.append(velocities)
 
-        if not (step + 1) % cfg.frames_per_chunk or (step + 1) == cfg.num_frames:
+        # Save the chunk
+        # NOTE: We had issues with loading checkpoints on different devices,
+        # Hence when resuming simply load the positions and velocities from the last saved chunk
+        # These are left here for completeness and in case someone wants to use them in the future
+        simulation.saveCheckpoint(os.path.join(cfg.output_dir, "checkpoint.chk"))
+        simulation.saveState(os.path.join(cfg.output_dir, "state.xml"))
+        with open(f"{cfg.output_dir}/system.xml", "w") as output:
+            output.write(XmlSerializer.serialize(system))
 
-            # Save the state of the simulation
-            # NOTE: We had issues with loading checkpoints on different devices,
-            # Hence when resuming simply load the positions and velocities from the last saved chunk
-            # These are left here for completeness and in case someone wants to use them in the future
-            simulation.saveCheckpoint(os.path.join(cfg.output_dir, "checkpoint.chk"))
-            simulation.saveState(os.path.join(cfg.output_dir, "state.xml"))
-            with open(f"{cfg.output_dir}/system.xml", "w") as output:
-                output.write(XmlSerializer.serialize(system))
+        position_chunk_filename = f"positions_{chunk_idx}.npz"
+        velocity_chunk_filename = f"velocities_{chunk_idx}.npz"
 
-            position_chunk_filename = f"positions_{step // cfg.frames_per_chunk}.npz"
-            velocity_chunk_filename = f"velocities_{step // cfg.frames_per_chunk}.npz"
+        position_chunk_path = os.path.join(chunks_dir, position_chunk_filename)
+        velocity_chunk_path = os.path.join(chunks_dir, velocity_chunk_filename)
 
-            position_chunk_path = os.path.join(chunks_dir, position_chunk_filename)
-            velocity_chunk_path = os.path.join(chunks_dir, velocity_chunk_filename)
+        chunk_positions = np.array(chunk_positions, dtype=np.float32)
+        chunk_velocities = np.array(chunk_velocities, dtype=np.float32)
 
-            chunk_positions = np.array(chunk_positions, dtype=np.float32)
-            chunk_velocities = np.array(chunk_velocities, dtype=np.float32)
-
-            logger.info(f"saving positions to {position_chunk_path} with shape {chunk_positions.shape}")
-            np.savez_compressed(position_chunk_path, positions=chunk_positions)
-            logger.info(f"saving velocities to {velocity_chunk_path} with shape {chunk_velocities.shape}")
-            np.savez_compressed(velocity_chunk_path, velocities=chunk_velocities)
-
-            chunk_positions = []
-            chunk_velocities = []
+        logger.info(f"saving positions to {position_chunk_path} with shape {chunk_positions.shape}")
+        np.savez_compressed(position_chunk_path, positions=chunk_positions)
+        logger.info(f"saving velocities to {velocity_chunk_path} with shape {chunk_velocities.shape}")
+        np.savez_compressed(velocity_chunk_path, velocities=chunk_velocities)
 
 
 if __name__ == "__main__":
