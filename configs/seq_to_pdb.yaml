@@ -8,3 +8,4 @@ defaults:
   - _self_
 task_name: seq_to_pdb
 seq_filename: null
+seq_name: null

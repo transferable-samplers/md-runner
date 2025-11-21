@@ -132,9 +132,16 @@ def seq_to_pdb(cfg: DictConfig) -> None:
     pdb_dir = Path(cfg.paths.data_dir) / "pdbs"
     pdb_dir.mkdir(parents=True, exist_ok=True)
 
-    seq_filename = cfg.seq_filename
-    with Path(seq_filename).open() as f:
-        sequences = [line.strip() for line in f.readlines()]
+    # Check only one of seq_filename or seq_name is provided
+    assert cfg.seq_filename is not None or cfg.seq_name is not None, "Either seq_filename or seq_name must be provided"
+    assert cfg.seq_filename is None or cfg.seq_name is None, "Only one of seq_filename or seq_name must be provided"
+
+    if cfg.seq_filename is not None:
+        seq_filename = cfg.seq_filename
+        with Path(seq_filename).open() as f:
+            sequences = [line.strip() for line in f.readlines()]
+    else:
+        sequences = [cfg.seq_name]
 
     for sequence in tqdm(sequences):
         save_path = pdb_dir / f"{sequence}.pdb"
