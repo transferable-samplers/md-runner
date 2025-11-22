@@ -21,6 +21,7 @@ A100: 1.22s / it
 CPU
     1x: 11.9 s/it
     2x 7.5 s/it
+
 """
 
 import logging
@@ -52,7 +53,6 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         cfg: Hydra configuration dictionary containing:
             - seq_name: Name of the sequence
             - pdb_dir: Directory containing PDB files
-            - output_dir: Directory to save simulation output
             - temperature: Simulation temperature in Kelvin
             - frame_interval: Number of integration steps between saved frames
             - frames_per_chunk: Number of frames to save per chunk file
@@ -76,11 +76,14 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
 
     if cfg.get("seq_name") is not None:
         pdb_path = Path(cfg.pdb_dir) / f"{cfg.seq_name}.pdb"
+        sequence = cfg.seq_name
     else:
         with Path(cfg.seq_filename).open() as f:
             sequences = f.read().strip().splitlines()
         sequence = sequences[cfg.seq_idx]
         pdb_path = Path(cfg.pdb_dir) / f"{sequence}.pdb"
+
+    output_dir = Path(cfg.paths.data_dir) / "md" / f"{sequence}_{cfg.temperature}_{cfg.frame_interval}_{cfg.frames_per_chunk}"
 
     # Calculate number of frames from time period
     # Each integration step is 1 fs, frame_interval steps between frames
@@ -99,8 +102,8 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         f"(last chunk may contain fewer frames).",
     )
 
-    chunks_dir = Path(cfg.output_dir) / "chunks"
-    Path(cfg.output_dir).mkdir(parents=True, exist_ok=True)
+    chunks_dir = Path(output_dir) / "chunks"
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
     chunks_dir.mkdir(parents=True, exist_ok=True)
 
     final_chunk_path = chunks_dir / f"chunk_{num_chunks - 1}.npz"
@@ -141,7 +144,7 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
     logger.info(f"Platform name: {cfg.platform_name} properties: {platform_properties}")
     simulation.reporters.append(
         StateDataReporter(
-            str(Path(cfg.output_dir) / "output.txt"),
+            str(Path(output_dir) / "output.txt"),
             cfg.log_freq * cfg.frame_interval,
             step=True,
             potentialEnergy=True,
@@ -232,9 +235,9 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         # NOTE: We had issues with loading checkpoints on different devices,
         # Hence when resuming simply load the positions and velocities from the last saved chunk.
         # These are left here for completeness and in case someone wants to use them in the future.
-        simulation.saveCheckpoint(str(Path(cfg.output_dir) / "checkpoint.chk"))
-        simulation.saveState(str(Path(cfg.output_dir) / "state.xml"))
-        system_xml_path = Path(cfg.output_dir) / "system.xml"
+        simulation.saveCheckpoint(str(Path(output_dir) / "checkpoint.chk"))
+        simulation.saveState(str(Path(output_dir) / "state.xml"))
+        system_xml_path = Path(output_dir) / "system.xml"
         with system_xml_path.open("w") as output:
             output.write(XmlSerializer.serialize(system))
 
