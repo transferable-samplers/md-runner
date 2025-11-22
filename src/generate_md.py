@@ -83,7 +83,7 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         sequence = sequences[cfg.seq_idx]
         pdb_path = Path(cfg.pdb_dir) / f"{sequence}.pdb"
 
-    output_dir = f"{cfg.paths.data_dir}/md/{sequence}_{cfg.temperature}_{cfg.frame_interval}_{cfg.frames_per_chunk}"
+    output_dir = Path(cfg.paths.data_dir) / "md" / f"{sequence}_{cfg.temperature}_{cfg.frame_interval}_{cfg.frames_per_chunk}"
 
     # Calculate number of frames from time period
     # Each integration step is 1 fs, frame_interval steps between frames
