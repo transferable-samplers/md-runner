@@ -172,9 +172,5 @@ cython_debug/
 *.sv?
 slurm*.out
 
-#data/
-runner/run_gpu.sh
-runner/configs/launcher/mila_cluster.yaml
-*.zip
-results/
-AImplicitUnconstrained
+# SLURM watch folders
+*watch_folder*/*

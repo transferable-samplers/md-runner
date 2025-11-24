@@ -2,7 +2,7 @@
 Shared test fixtures.
 """
 
-import os
+import logging
 from collections.abc import Generator
 from pathlib import Path
 
@@ -13,11 +13,11 @@ from omegaconf import open_dict
 from src.seq_to_pdb import seq_to_pdb
 from tests.helpers.utils import compose_config
 
-# Create report directory if it doesn't exist
-report_dir = os.environ.get("PYTEST_REPORT_DIR", "tests/")
-Path(report_dir).mkdir(parents=True, exist_ok=True)
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-TEST_SEQUENCE = "PYA"
+# TEST_SEQUENCE = "AVMPDQWVYWDNNIQT"
+TEST_SEQUENCE = "AVMP"
 
 
 @pytest.fixture(scope="session")
@@ -61,7 +61,7 @@ def dir_with_pdb(shared_tmp_path: Path) -> Generator[Path, None, None]:
         cfg.paths.log_dir = str(shared_tmp_path / "logs")
         cfg.paths.work_dir = str(Path.cwd())
 
-    # Generate PDB files once for all tests in this session
+    # Generate PDB file once for all tests in this session
     seq_to_pdb(cfg)
 
     pdb_dir = Path(cfg.paths.data_dir) / "pdbs"
