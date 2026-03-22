@@ -15,6 +15,9 @@ seq_name: null
 seq_filename: null
 seq_idx: null
 temperature: 310
+forcefield_files:
+  - amber14-all.xml
+  - implicit/obc1.xml
 warmup_steps: 50_000 # How many integration steps to take before recording frames
 frame_interval: 1_000 # How many integration steps between recorded frames (each step is 1 fs)
 time_ns: 1.0 # Total simulation time in nanoseconds

@@ -118,7 +118,7 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         if "Threads" in platform_properties:
             platform_properties["Threads"] = str(platform_properties["Threads"])
 
-    forcefield = ForceField("amber14-all.xml", "implicit/obc1.xml")
+    forcefield = ForceField(*cfg.forcefield_files)
     system = forcefield.createSystem(
         topology,
         nonbondedMethod=openmm.app.CutoffNonPeriodic,

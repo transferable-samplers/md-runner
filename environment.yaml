@@ -27,6 +27,7 @@ dependencies:
   - pytest=7.*
   - ambertools # Required for MD generation
   - openmm
+  - openmmtools
   - pip>=23
   - pip:
       - mdtraj
@@ -39,3 +40,4 @@ dependencies:
       - isort
       - hydra-submitit-launcher
       - pytest-xdist
+      - git+https://github.com/pujaltes/openmmtools.git@deo_minimize
