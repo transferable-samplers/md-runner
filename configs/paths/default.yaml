@@ -4,7 +4,7 @@
 root_dir: ${oc.env:PROJECT_ROOT}
 
 # path to scratch directory
-scratch_dir: ${oc.env:SCRATCH_DIR}/md-runner-remd
+scratch_dir: ${oc.env:SCRATCH_DIR}/md-runner-remd-uniref
 
 # path to data directory
 data_dir: ${paths.scratch_dir}/data
