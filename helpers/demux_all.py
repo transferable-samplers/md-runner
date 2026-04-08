@@ -177,6 +177,9 @@ def main() -> None:
     p.add_argument("--remd-root", type=Path, required=True, help="Path to .../data/remd directory")
     p.add_argument("--out-dir", type=Path, default=None, help="If set, write outputs here instead of per-run dir")
     p.add_argument(
+        "--sequence", type=str, default=None, help="Only demux runs whose directory name contains this string"
+    )
+    p.add_argument(
         "--save-swap-rates",
         action="store_true",
         help="Also compute neighbor swap rates and write swap_rates.txt",
@@ -189,6 +192,8 @@ def main() -> None:
         sys.exit(1)
 
     runs = find_remd_runs(remd_root)
+    if args.sequence:
+        runs = [r for r in runs if args.sequence in r.name]
     if not runs:
         print(f"Error: no run dirs with remd.nc + remd_checkpoint.nc found in {remd_root}", file=sys.stderr)
         sys.exit(1)
