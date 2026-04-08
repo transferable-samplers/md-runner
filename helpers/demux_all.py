@@ -1,4 +1,24 @@
 #!/usr/bin/env python3
+"""Demultiplex all REMD runs into per-temperature trajectories.
+
+Output: one `trajectories.npz` per run directory (or in --out-dir if specified).
+Location: /network/scratch/t/tanc/md-runner-short/data/remd/<run_name>/trajectories.npz
+
+NPZ keys:
+  "temperatures"        - float32 array of temperatures in Kelvin, shape (n_states,)
+  "{T}_positions"       - float32 positions in nm, shape (n_frames, n_atoms, 3)
+  "{T}_velocities"      - float32 velocities in nm/ps, shape (n_frames, n_atoms, 3)
+
+  where {T} is the temperature formatted to 1 decimal place, e.g. "300.0", "336.0".
+
+Example:
+  data = np.load("trajectories.npz")
+  temps = data["temperatures"]           # [300.0, 336.0, 377.0, 450.0]
+  pos = data["300.0_positions"]          # (n_frames, n_atoms, 3)
+
+Frame count to simulation time: n_frames * timestep_fs * frame_interval / 1e6 = ns
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -79,20 +99,13 @@ def compute_neighbor_swap_rates(reporter: multistate.MultiStateReporter) -> np.n
     return rates
 
 
-def load_temperatures_if_present(reporter: multistate.MultiStateReporter) -> Optional[np.ndarray]:
-    """Best-effort temperature extraction from storage metadata (may be None)."""
-    try:
-        storage = reporter._storage
-        if hasattr(storage, "groups"):
-            for key in ["thermodynamic_states", "thermodynamic_state"]:
-                if key in storage.groups:
-                    grp = storage.groups[key]
-                    if "temperatures" in grp.variables:
-                        temps = np.array(grp.variables["temperatures"][:])
-                        return temps.astype(np.float32)
-    except Exception:
-        pass
-    return None
+def load_temperatures(reporter: multistate.MultiStateReporter) -> np.ndarray:
+    """Extract temperatures (in Kelvin) from the reporter's thermodynamic states."""
+    from simtk import unit
+
+    states = reporter.read_thermodynamic_states()[0]
+    temps = np.array([s.temperature.value_in_unit(unit.kelvin) for s in states], dtype=np.float32)
+    return temps
 
 
 def _safe_close_reporter(reporter: multistate.MultiStateReporter) -> None:
@@ -119,7 +132,13 @@ def process_run_dir(run_dir: Path, out_dir: Optional[Path], save_swap_rates: boo
         )
 
         positions, velocities = demultiplex_trajectories_from_reporter(reporter)
-        temps = load_temperatures_if_present(reporter)
+        temps = load_temperatures(reporter)
+
+        n_states = positions.shape[0]
+        if len(temps) != n_states:
+            raise RuntimeError(
+                f"Temperature count ({len(temps)}) != state count ({n_states})",
+            )
 
         if out_dir is None:
             out_path = run_dir / "trajectories.npz"
@@ -129,10 +148,13 @@ def process_run_dir(run_dir: Path, out_dir: Optional[Path], save_swap_rates: boo
             out_path = out_dir / f"{run_dir.name}.trajectories.npz"
             swap_path = out_dir / f"{run_dir.name}.swap_rates.txt"
 
-        if temps is None:
-            np.savez_compressed(out_path, positions=positions, velocities=velocities)
-        else:
-            np.savez_compressed(out_path, positions=positions, velocities=velocities, temperatures=temps)
+        # Keys: "temperatures", "{T}_positions", "{T}_velocities"
+        data = {"temperatures": temps.astype(np.float32)}
+        for i, t in enumerate(temps):
+            key = f"{t:.1f}"
+            data[f"{key}_positions"] = positions[i]  # (n_ckpt, n_atoms, 3)
+            data[f"{key}_velocities"] = velocities[i]  # (n_ckpt, n_atoms, 3)
+        np.savez_compressed(out_path, **data)
 
         if save_swap_rates:
             rates = compute_neighbor_swap_rates(reporter)
