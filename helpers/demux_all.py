@@ -7,7 +7,6 @@ Location: /network/scratch/t/tanc/md-runner-short/data/remd/<run_name>/trajector
 NPZ keys:
   "temperatures"        - float32 array of temperatures in Kelvin, shape (n_states,)
   "{T}_positions"       - float32 positions in nm, shape (n_frames, n_atoms, 3)
-  "{T}_velocities"      - float32 velocities in nm/ps, shape (n_frames, n_atoms, 3)
 
   where {T} is the temperature formatted to 1 decimal place, e.g. "300.0", "336.0".
 
@@ -22,6 +21,7 @@ Frame count to simulation time: n_frames * timestep_fs * frame_interval / 1e6 = 
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 from typing import Optional, Tuple
@@ -45,20 +45,18 @@ def find_remd_runs(remd_root: Path) -> list[Path]:
 
 def demultiplex_trajectories_from_reporter(
     reporter: multistate.MultiStateReporter,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
-    Demultiplex using checkpoint positions/velocities and analysis state assignments.
+    Demultiplex using checkpoint positions and analysis state assignments.
 
     Returns:
       positions: (n_states, n_ckpt, n_atoms, 3) float32
-      velocities: (n_states, n_ckpt, n_atoms, 3) float32
     """
     checkpoint = reporter._storage_checkpoint
     analysis = reporter._storage_analysis
     checkpoint_interval = int(checkpoint.CheckpointInterval)
 
     positions = np.array(checkpoint.variables["positions"][:])  # (n_ckpt, replica, atom, 3)
-    velocities = np.array(checkpoint.variables["velocities"][:])  # (n_ckpt, replica, atom, 3)
     all_states = np.array(analysis.variables["states"][:])  # (n_iter, replica)
 
     n_ckpt, n_replicas, n_atoms, _ = positions.shape
@@ -74,14 +72,12 @@ def demultiplex_trajectories_from_reporter(
     states_at_ckpt = all_states[ckpt_indices]  # (n_ckpt, replica)
 
     demux_pos = np.zeros((n_replicas, n_ckpt, n_atoms, 3), dtype=np.float32)
-    demux_vel = np.zeros((n_replicas, n_ckpt, n_atoms, 3), dtype=np.float32)
 
     for frame in range(n_ckpt):
         order = np.argsort(states_at_ckpt[frame])
         demux_pos[:, frame] = positions[frame, order]
-        demux_vel[:, frame] = velocities[frame, order]
 
-    return demux_pos, demux_vel
+    return demux_pos
 
 
 def compute_neighbor_swap_rates(reporter: multistate.MultiStateReporter) -> np.ndarray:
@@ -119,7 +115,7 @@ def _safe_close_reporter(reporter: multistate.MultiStateReporter) -> None:
             pass
 
 
-def process_run_dir(run_dir: Path, out_dir: Optional[Path], save_swap_rates: bool) -> bool:
+def process_run_dir(run_dir: Path, out_dir: Optional[Path], save_swap_rates: bool, stride: int = 1) -> Optional[int]:
     nc_path = run_dir / "remd.nc"
     ckpt_path = run_dir / "remd_checkpoint.nc"
     reporter = None
@@ -131,7 +127,10 @@ def process_run_dir(run_dir: Path, out_dir: Optional[Path], save_swap_rates: boo
             open_mode="r",
         )
 
-        positions, velocities = demultiplex_trajectories_from_reporter(reporter)
+        positions = demultiplex_trajectories_from_reporter(reporter)
+        n_frames_raw = positions.shape[1]
+        if stride > 1:
+            positions = positions[:, ::stride]
         temps = load_temperatures(reporter)
 
         n_states = positions.shape[0]
@@ -148,24 +147,22 @@ def process_run_dir(run_dir: Path, out_dir: Optional[Path], save_swap_rates: boo
             out_path = out_dir / f"{run_dir.name}.trajectories.npz"
             swap_path = out_dir / f"{run_dir.name}.swap_rates.txt"
 
-        # Keys: "temperatures", "{T}_positions", "{T}_velocities"
         data = {"temperatures": temps.astype(np.float32)}
         for i, t in enumerate(temps):
             key = f"{t:.1f}"
             data[f"{key}_positions"] = positions[i]  # (n_ckpt, n_atoms, 3)
-            data[f"{key}_velocities"] = velocities[i]  # (n_ckpt, n_atoms, 3)
         np.savez_compressed(out_path, **data)
 
         if save_swap_rates:
             rates = compute_neighbor_swap_rates(reporter)
             np.savetxt(swap_path, rates)
 
-        print(f"[OK] {run_dir.name} -> {out_path.name}  pos={positions.shape} vel={velocities.shape}")
-        return True
+        print(f"[OK] {run_dir.name} -> {out_path.name}  frames={n_frames_raw}  pos={positions.shape}")
+        return n_frames_raw
 
     except Exception as e:
         print(f"[FAIL] {run_dir}: {e}", file=sys.stderr)
-        return False
+        return None
 
     finally:
         if reporter is not None:
@@ -177,12 +174,28 @@ def main() -> None:
     p.add_argument("--remd-root", type=Path, required=True, help="Path to .../data/remd directory")
     p.add_argument("--out-dir", type=Path, default=None, help="If set, write outputs here instead of per-run dir")
     p.add_argument(
-        "--sequence", type=str, default=None, help="Only demux runs whose directory name contains this string"
+        "--sequence",
+        type=str,
+        default=None,
+        help="Only demux runs whose directory name contains this string",
+    )
+    p.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Keep every Nth frame (e.g. --stride 4 keeps every 4th frame)",
     )
     p.add_argument(
         "--save-swap-rates",
         action="store_true",
-        help="Also compute neighbor swap rates and write swap_rates.txt",
+        default=True,
+        help="Also compute neighbor swap rates and write swap_rates.txt (default: True)",
+    )
+    p.add_argument(
+        "--log-csv",
+        type=Path,
+        default=None,
+        help="Write a CSV log of run name, frames, and status",
     )
     args = p.parse_args()
 
@@ -202,14 +215,25 @@ def main() -> None:
 
     ok = 0
     bad = 0
+    results = []
     for i, d in enumerate(runs, 1):
         print(f"\n[{i}/{len(runs)}] Processing {d.name}")
-        if process_run_dir(d, args.out_dir, args.save_swap_rates):
+        n_frames = process_run_dir(d, args.out_dir, args.save_swap_rates, args.stride)
+        if n_frames is not None:
             ok += 1
+            results.append((d.name, n_frames, "ok"))
         else:
             bad += 1
+            results.append((d.name, 0, "fail"))
 
     print(f"\nSummary: {ok} succeeded, {bad} failed")
+
+    if args.log_csv:
+        with open(args.log_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["run", "frames", "status"])
+            w.writerows(results)
+        print(f"Log written to {args.log_csv}")
 
 
 if __name__ == "__main__":

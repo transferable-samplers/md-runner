@@ -3,9 +3,9 @@
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
 #SBATCH -t 24:00:00
-#SBATCH --partition=long
+#SBATCH --partition=unkillable
 #SBATCH --gres=gpu:1
-#SBATCH -c 8
+#SBATCH -c 4
 #SBATCH --array=0-0
 #SBATCH --open-mode=append
 #SBATCH --requeue

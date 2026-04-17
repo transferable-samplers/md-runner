@@ -6,7 +6,7 @@
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
-#SBATCH --array=0-800%250
+#SBATCH --array=0-463%250
 #SBATCH --open-mode=append
 #SBATCH --requeue
 #SBATCH --signal=SIGUSR1@90
@@ -19,7 +19,7 @@ echo "SLURM array ID: $SLURM_ARRAY_TASK_ID"
 # ============================
 # Configuration
 # ============================
-SEQ_FILE="sequences/UniRef50ChunksClustered.txt"
+SEQ_FILE="sequences/new_todo.txt"
 
 TOTAL_PER_JOB=20        # <-- N total sequences handled by this slurm task
 MAX_CONCURRENT=4        # <-- at most 4 python processes at a time
