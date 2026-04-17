@@ -7,7 +7,6 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import List
 
 import hydra
 import rootutils
@@ -47,7 +46,7 @@ quit
 """
 
 
-def translate_1letter_to_3letter(one_letter_seq: str, zwitter_ion: bool = True) -> List[str]:
+def translate_1letter_to_3letter(one_letter_seq: str, zwitter_ion: bool = True) -> list[str]:
     """
     Convert a one-letter amino acid sequence to three-letter codes.
 
@@ -72,7 +71,7 @@ def translate_1letter_to_3letter(one_letter_seq: str, zwitter_ion: bool = True) 
     return three_letter_seq
 
 
-def make_peptide_with_tleap(three_letter_seq: List[str], save_path: Path) -> None:
+def make_peptide_with_tleap(three_letter_seq: list[str], save_path: Path) -> None:
     """
     Generate a PDB file for a three-letter amino acid sequence using tLEaP.
 
@@ -166,12 +165,8 @@ def seq_to_pdb(cfg: DictConfig) -> None:
     pdb_dir.mkdir(parents=True, exist_ok=True)
 
     # Check only one of seq_filename or seq_name is provided
-    assert cfg.seq_filename is not None or cfg.seq_name is not None, (
-        "Either seq_filename or seq_name must be provided"
-    )
-    assert cfg.seq_filename is None or cfg.seq_name is None, (
-        "Only one of seq_filename or seq_name must be provided"
-    )
+    assert cfg.seq_filename is not None or cfg.seq_name is not None, "Either seq_filename or seq_name must be provided"
+    assert cfg.seq_filename is None or cfg.seq_name is None, "Only one of seq_filename or seq_name must be provided"
 
     if cfg.seq_filename is not None:
         seq_filename = cfg.seq_filename

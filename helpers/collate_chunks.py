@@ -1,130 +1,146 @@
-#!/usr/bin/env python3
-"""Collate chunk_*.npz files from MD runs into single trajectory .npz files.
-
-Designed for SLURM array parallelism. Each task processes a chunk of run dirs.
-
-Output per run: {run_name}.trajectories.npz with key "positions" (n_frames, n_atoms, 3).
-"""
-
-from __future__ import annotations
-
 import argparse
-import csv
-import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
 
-def find_md_runs(md_root: Path) -> list[Path]:
-    """Return run directories containing a chunks/ subdirectory with .npz files."""
-    runs = []
-    for d in md_root.iterdir():
-        if not d.is_dir():
-            continue
-        chunks_dir = d / "chunks"
-        if chunks_dir.is_dir() and any(chunks_dir.glob("chunk_*.npz")):
-            runs.append(d)
-    return sorted(runs)
+def collate_chunks_for_sequence(chunks_dir: Path, output_path: Path) -> bool:
+    """Collate chunks for a single sequence. Returns True if successful."""
+    # Find all chunk files
+    chunk_files = sorted(
+        chunks_dir.glob("chunk_*.npz"),
+        key=lambda p: int(p.stem.split("_")[-1]),
+    )
 
+    if not chunk_files:
+        print(f"Warning: No chunk_*.npz files found in {chunks_dir}", file=sys.stderr)
+        return False
 
-def collate_run(run_dir: Path, out_dir: Path, stride: int = 1) -> Optional[int]:
-    """Concatenate all chunk_*.npz into a single trajectories.npz (positions only).
+    # Load and collect all positions and velocities
+    positions_list = []
+    velocities_list = []
 
-    Returns the total number of frames before striding, or None on failure.
-    """
-    chunks_dir = run_dir / "chunks"
+    for chunk_file in chunk_files:
+        with np.load(chunk_file) as chunk_data:
+            if "positions" not in chunk_data:
+                print(f"Warning: {chunk_file} missing 'positions' key", file=sys.stderr)
+                return False
+            if "velocities" not in chunk_data:
+                print(f"Warning: {chunk_file} missing 'velocities' key", file=sys.stderr)
+                return False
 
-    try:
-        chunk_files = sorted(chunks_dir.glob("chunk_*.npz"), key=lambda p: int(p.stem.split("_")[1]))
-        if not chunk_files:
-            print(f"  [SKIP] no chunk files in {chunks_dir}")
-            return None
+            positions = chunk_data["positions"]
+            velocities = chunk_data["velocities"]
 
-        all_positions = []
-        for cf in chunk_files:
-            data = np.load(cf)
-            all_positions.append(data["positions"])
+        if positions.shape[0] != velocities.shape[0]:
+            print(
+                f"Warning: {chunk_file} positions/velocities length mismatch "
+                f"({positions.shape[0]} vs {velocities.shape[0]})",
+                file=sys.stderr,
+            )
+            return False
 
-        positions = np.concatenate(all_positions, axis=0)  # (total_frames, n_atoms, 3)
-        n_frames_raw = positions.shape[0]
+        positions_list.append(positions)
+        velocities_list.append(velocities)
 
-        if stride > 1:
-            positions = positions[::stride]
+    if not positions_list:
+        print(f"Warning: No valid chunk data found in {chunks_dir}", file=sys.stderr)
+        return False
 
-        out_dir.mkdir(parents=True, exist_ok=True)
-        out_path = out_dir / f"{run_dir.name}.trajectories.npz"
-        np.savez_compressed(out_path, positions=positions)
+    # Concatenate into contiguous arrays
+    combined_positions = np.concatenate(positions_list, axis=0)
+    combined_velocities = np.concatenate(velocities_list, axis=0)
 
-        print(f"[OK] {run_dir.name} -> {out_path.name}  frames={n_frames_raw}  pos={positions.shape}")
-        return n_frames_raw
+    # Save combined arrays
+    np.savez_compressed(
+        output_path,
+        positions=combined_positions,
+        velocities=combined_velocities,
+    )
 
-    except Exception as e:
-        print(f"[FAIL] {run_dir}: {e}", file=sys.stderr)
-        return None
+    print(
+        f"Saved {len(chunk_files)} chunks -> {output_path} (shape: {combined_positions.shape})",
+    )
+    return True
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(
-        description="Collate MD chunk trajectories. Supports SLURM array parallelism.",
+    p = argparse.ArgumentParser(description="Combine chunk files into contiguous arrays for all sequences")
+    p.add_argument(
+        "--input-dir",
+        type=Path,
+        required=True,
+        help="Root input directory containing {seq}_info/chunks/ directories",
     )
-    p.add_argument("--md-root", type=Path, required=True, help="Path to a data/md/ directory")
-    p.add_argument("--out-dir", type=Path, required=True, help="Output directory for .npz and .csv files")
-    p.add_argument("--stride", type=int, default=1, help="Keep every Nth frame (e.g. --stride 4)")
-    p.add_argument("--chunk-size", type=int, default=None, help="Runs per SLURM array task. If unset, process all.")
+    p.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Output directory to save combined arrays",
+    )
+    p.add_argument(
+        "--threads",
+        type=int,
+        default=8,
+        help="Number of threads to use for parallel processing (default: 8)",
+    )
     args = p.parse_args()
 
-    if not args.md_root.exists():
-        print(f"Error: md root does not exist: {args.md_root}", file=sys.stderr)
+    input_dir = args.input_dir
+    output_dir = args.output_dir
+
+    if not input_dir.exists():
+        print(f"Error: Input directory does not exist: {input_dir}", file=sys.stderr)
         sys.exit(1)
 
-    all_runs = find_md_runs(args.md_root)
-    if not all_runs:
-        print(f"Error: no run dirs with chunks/ found in {args.md_root}", file=sys.stderr)
+    # Find all {seq}_info directories
+    seq_info_dirs = sorted(input_dir.glob("*"))
+    if not seq_info_dirs:
+        print(f"Error: No *_info directories found in {input_dir}", file=sys.stderr)
         sys.exit(1)
 
-    # SLURM array slicing
-    task_id = os.environ.get("SLURM_ARRAY_TASK_ID")
-    if task_id is not None and args.chunk_size is not None:
-        task_id = int(task_id)
-        start = task_id * args.chunk_size
-        end = start + args.chunk_size
-        runs = all_runs[start:end]
-        print(f"SLURM task {task_id}: runs [{start}:{end}] ({len(runs)} of {len(all_runs)})")
-    else:
-        runs = all_runs
-        print(f"Processing all {len(runs)} runs")
+    print(f"Found {len(seq_info_dirs)} sequence directories")
 
-    if not runs:
-        print("No runs for this task, exiting.")
-        sys.exit(0)
+    # Create output directory if it doesn't exist
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    ok = 0
-    bad = 0
-    results = []
-    for i, d in enumerate(runs, 1):
-        print(f"\n[{i}/{len(runs)}] {d.name}")
-        n_frames = collate_run(d, args.out_dir, args.stride)
-        if n_frames is not None:
-            ok += 1
-            results.append((d.name, n_frames, "ok"))
-        else:
-            bad += 1
-            results.append((d.name, 0, "fail"))
+    def process_sequence(seq_info_dir: Path) -> bool:
+        """Process a single sequence. Returns True if successful."""
+        chunks_dir = seq_info_dir / "chunks"
+        if not chunks_dir.exists():
+            print(f"Warning: {chunks_dir} does not exist, skipping", file=sys.stderr)
+            return False
 
-    print(f"\nSummary: {ok} succeeded, {bad} failed")
+        seq_name = seq_info_dir.name.split("_")[0]
+        output_path = output_dir / f"{seq_name}.npz"
 
-    # Write CSV log
-    args.out_dir.mkdir(parents=True, exist_ok=True)
-    suffix = f"_{task_id}" if task_id is not None else ""
-    log_path = args.out_dir / f"collate_log{suffix}.csv"
-    with open(log_path, "w", newline="") as f:
-        w = csv.writer(f)
-        w.writerow(["run", "frames", "status"])
-        w.writerows(results)
-    print(f"Log written to {log_path}")
+        return collate_chunks_for_sequence(chunks_dir, output_path)
+
+    # Process sequences in parallel
+    successful = 0
+    failed = 0
+
+    with ThreadPoolExecutor(max_workers=args.threads) as executor:
+        # Submit all tasks
+        future_to_seq = {
+            executor.submit(process_sequence, seq_info_dir): seq_info_dir for seq_info_dir in seq_info_dirs
+        }
+
+        # Process completed tasks
+        for future in as_completed(future_to_seq):
+            seq_info_dir = future_to_seq[future]
+            try:
+                if future.result():
+                    successful += 1
+                else:
+                    failed += 1
+            except Exception as exc:
+                print(f"Error processing {seq_info_dir}: {exc}", file=sys.stderr)
+                failed += 1
+
+    print(f"\nSummary: {successful} successful, {failed} failed")
 
 
 if __name__ == "__main__":

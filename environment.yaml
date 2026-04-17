@@ -31,13 +31,13 @@ dependencies:
   - pip>=23
   - pip:
       - mdtraj
-      - hydra-optuna-sweeper
       - hydra-colorlog
       - rootutils
       - ipdb
       - black
       - flake8
       - isort
-      - hydra-submitit-launcher
       - pytest-xdist
       - git+https://github.com/pujaltes/openmmtools.git@deo_minimize
+      - pytest-benchmark
+      - biopython

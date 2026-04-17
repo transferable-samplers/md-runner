@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 from hydra import compose, initialize
 from hydra.core.global_hydra import GlobalHydra
@@ -10,7 +10,7 @@ RELATIVE_CONFIG_PATH = "../../configs"  # relative to this utils.py file
 
 def compose_config(
     config_name: str,
-    overrides: Optional[List[str]] = None,
+    overrides: Optional[list[str]] = None,
 ) -> DictConfig:
     """
     Compose a Hydra configuration from a config file.
@@ -60,3 +60,11 @@ def extract_test_sequence(cfg: DictConfig) -> Any:
     """
     seq = getattr(cfg.data, "sequence", None) or cfg.data.test_sequences
     return seq[0] if isinstance(seq, list) else seq
+
+
+def get_project_root(marker=".project-root") -> Path:
+    p = Path(__file__).resolve()
+    for parent in [p] + list(p.parents):
+        if (parent / marker).exists():
+            return parent
+    raise RuntimeError(f"Project root marker '{marker}' not found.")

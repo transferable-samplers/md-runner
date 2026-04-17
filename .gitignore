@@ -181,3 +181,6 @@ AImplicitUnconstrained
 
 *.out
 watch_folder_old/*
+
+# SLURM watch folders
+*watch_folder*/*

@@ -2,7 +2,6 @@
 Tests for generate_md.py - generating MD simulation data.
 """
 
-import os
 from pathlib import Path
 
 import numpy as np
@@ -11,12 +10,9 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import DictConfig, open_dict
 
 from src.generate_md import generate_md
+from src.utils import get_md_output_dir
 from tests.conftest import TEST_SEQUENCE
 from tests.helpers.utils import compose_config
-
-# Create report directory if it doesn't exist
-report_dir = os.environ.get("PYTEST_REPORT_DIR", "tests/")
-Path(report_dir).mkdir(parents=True, exist_ok=True)
 
 
 @pytest.fixture
@@ -217,7 +213,7 @@ def test_generate_md_basic(cfg_test_generate_md: DictConfig) -> None:
     """
     generate_md(cfg_test_generate_md)
 
-    chunks_dir = Path(cfg_test_generate_md.output_dir) / "chunks"
+    chunks_dir = get_md_output_dir(cfg_test_generate_md, TEST_SEQUENCE) / "chunks"
     assert chunks_dir.exists(), "Chunks directory not created"
 
     chunk_files = list(chunks_dir.glob("chunk_*.npz"))
@@ -242,7 +238,7 @@ def test_generate_md_resume(cfg_test_generate_md: DictConfig) -> None:
     """
     generate_md(cfg_test_generate_md)
 
-    chunks_dir = Path(cfg_test_generate_md.output_dir) / "chunks"
+    chunks_dir = get_md_output_dir(cfg_test_generate_md, TEST_SEQUENCE) / "chunks"
     assert chunks_dir.exists(), "Chunks directory not created"
 
     chunk_files = list(chunks_dir.glob("chunk_*.npz"))

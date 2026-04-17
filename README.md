@@ -34,13 +34,22 @@ python src/generate_md.py seq_name=AA
 
 ### 3. Run Molecular Dynamics Simulations (SLURM)
 
-For large-scale dataset generation, use the [hydra-submitit-launcher](https://hydra.cc/docs/plugins/submitit_launcher/) plug-in. An example script is provide in:
+For large-scale dataset generation, we recommend the following SLURM script:
 
 ```bash
-./submitit/run-md.py
+./slurm/generate_md_mps.sh
 ```
 
-Each individual sequence in `seq_filename` will be launched as a separate SLURM job.
+This script runs a SLURM array in which N parallel jobs are launched on each GPU, making use of CUDA MPS. The default value is N=4, as determined using a NVIDIA L40S, 4 CPU, 32GB RAM using benchmark sequence `AVMPDQWVYWDNNIQT` for 500ps:
+
+| Name                          | Min          | Max          | Mean         |
+|------------------------------|--------------|--------------|--------------|
+| test_benchmark_md_mps[4]     | 3.4955       | 8.9560       | 6.7632       |
+| test_benchmark_md_mps[2]     | 5.8704       | 9.2019       | 7.0463       |
+| test_benchmark_md_mps[8]     | 7.1361       | 32.6664      | 19.4219      |
+| test_benchmark_md_sequential | 10.3010      | 10.4901      | 10.3697      |
+
+Run `pytest tests/benchmark/test_benchmark_md.py` to benchmark on any given system.
 
 ## Citation
 
@@ -48,12 +57,12 @@ If you use this codebase or [**ManyPeptidesMD**](https://huggingface.co/datasets
 
 ```
 @misc{tan2025amortized
-      title={Amortized Sampling with Transferable Normalizing Flows}, 
+      title={Amortized Sampling with Transferable Normalizing Flows},
       author={Charlie B. Tan and Majdi Hassan and Leon Klein and Saifuddin Syed and Dominique Beaini and Michael M. Bronstein and Alexander Tong and Kirill Neklyudov},
       year={2025},
       eprint={2508.18175},
       archivePrefix={arXiv},
       primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2508.18175}, 
+      url={https://arxiv.org/abs/2508.18175},
 }
 ```
