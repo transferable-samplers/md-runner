@@ -1,9 +1,13 @@
 # convert_npz.py
-import sys, os, numpy as np
+import os
+import sys
 from concurrent.futures import ProcessPoolExecutor
+
+import numpy as np
 
 SRC, DST = sys.argv[1], sys.argv[2]
 os.makedirs(DST, exist_ok=True)
+
 
 def convert(name):
     src = os.path.join(SRC, name)
@@ -14,6 +18,7 @@ def convert(name):
         # re-save uncompressed; same keys, same dtypes
         np.savez(dst, **{k: z[k] for k in z.files})
     print(name)
+
 
 files = [f for f in os.listdir(SRC) if f.endswith(".npz")]
 with ProcessPoolExecutor(max_workers=8) as ex:
