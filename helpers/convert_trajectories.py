@@ -26,7 +26,7 @@ def load_trajectory(path: str) -> tuple[np.ndarray, np.ndarray]:
 
 def _seed_for(global_seed: int, seq_name: str) -> np.random.SeedSequence:
     # Stable, order-independent seed derived from (global_seed, seq_name).
-    h = int.from_bytes(hashlib.sha256(seq_name.encode("utf-8")).digest()[:4], "big")
+    h = int.from_bytes(hashlib.sha256(seq_name.encode("utf-8")).digest()[:8], "big")
     return np.random.SeedSequence([int(global_seed), h])
 
 
@@ -54,14 +54,10 @@ def convert_one(
     for r in range(T):
         rng = np.random.default_rng(child_seeds[r])
         perm = rng.permutation(F)
-        positions[r] = positions[r, perm]
+        np.take(positions[r], perm, axis=0, out=positions[r])
 
-    tmp_pos = pos_out + ".tmp"
-    tmp_temps = temps_out + ".tmp"
-    np.save(tmp_pos, positions)
-    np.save(tmp_temps, temps)
-    os.replace(tmp_pos, pos_out)
-    os.replace(tmp_temps, temps_out)
+    np.save(pos_out, positions)
+    np.save(temps_out, temps)
     return f"done {seq_name} T={T} F={F} N={N}"
 
 
