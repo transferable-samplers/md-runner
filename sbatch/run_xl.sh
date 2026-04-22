@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J generate_remd_reference_big_eval
+#SBATCH -J generate_remd_reference_xl
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
 #SBATCH -t 48:00:00
