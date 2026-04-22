@@ -110,13 +110,28 @@ def add_com_restraint(
     system.addForce(force)
 
 
-def get_system(topology, forcefield_files, com_restraint=False):
+CONSTRAINT_MAP = {
+    None: None,
+    "None": None,
+    "HBonds": openmm.app.HBonds,
+    "AllBonds": openmm.app.AllBonds,
+    "HAngles": openmm.app.HAngles,
+}
+
+
+def resolve_constraints(constraints):
+    if constraints in CONSTRAINT_MAP:
+        return CONSTRAINT_MAP[constraints]
+    raise ValueError(f"Unknown constraints value {constraints!r}; expected one of {list(CONSTRAINT_MAP)}")
+
+
+def get_system(topology, forcefield_files, com_restraint=False, constraints="HBonds"):
     forcefield = ForceField(*forcefield_files)
     system = forcefield.createSystem(
         topology,
         nonbondedMethod=openmm.app.CutoffNonPeriodic,
         nonbondedCutoff=2.0 * unit.nanometer,
-        constraints=openmm.app.HBonds,
+        constraints=resolve_constraints(constraints),
     )
     if com_restraint:
         add_com_restraint(system, topology)
@@ -251,7 +266,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     # time_ns * 1e6 fs/ns = total time in fs = num_frames * frame_interval * timestep_fs
     num_frames = int(cfg.time_ns * 1e6 / (cfg.frame_interval * cfg.timestep_fs))
 
-    system = get_system(topology, cfg.forcefield_files, cfg.com_restraint)
+    system = get_system(topology, cfg.forcefield_files, cfg.com_restraint, cfg.get("constraints", "HBonds"))
 
     temperatures = geometric_temps(cfg.min_temp * unit.kelvin, cfg.max_temp * unit.kelvin, n_states)
     logger.info(

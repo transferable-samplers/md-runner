@@ -38,8 +38,8 @@ time python helpers/build_webdataset_remd.py \
     --output-dir "$LOCAL_OUT" \
     --trajectory-file-suffix ".trajectories" \
     --samples-per-replica-per-tar 1 \
-    --batch-size 32 \
-    --max-workers-load 16 \
+    --batch-size 64 \
+    --max-workers-load 8 \
     --max-workers-tar 6
 
 echo "=== Copying $LOCAL_OUT -> $DST ==="

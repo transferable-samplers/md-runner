@@ -2,7 +2,7 @@
 #SBATCH -J generate_remd_mps_pdbs_4aa
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
-#SBATCH -t 24:00:00
+#SBATCH -t 48:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
@@ -64,7 +64,7 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     break
   fi
   echo "Launching seq_idx=$IDX"
-  python src/generate_remd.py seq_idx=$IDX seq_filename="$SEQ_FILE" n_states=auto time_ns=$TIME_NS paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-mpmd &
+  python src/generate_remd.py seq_idx=$IDX seq_filename="$SEQ_FILE" n_states=auto time_ns=$TIME_NS constraints=null timestep_fs=1.0 frame_interval=5000 paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-pdbs_4aa &
 
   running=$(( running + 1 ))
   if [ "$running" -ge "$MAX_CONCURRENT" ]; then

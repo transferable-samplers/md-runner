@@ -31,7 +31,7 @@ def main() -> None:
     p.add_argument(
         "--batch-size",
         type=int,
-        default=32,
+        default=64,
         help="Number of tars buffered simultaneously. Memory ~ batch_size * num_seqs * T * K * (N*3+1)*4 bytes.",
     )
     p.add_argument("--seed", type=int, default=42)

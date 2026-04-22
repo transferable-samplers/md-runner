@@ -17,6 +17,7 @@ min_temp: 300
 max_temp: 450
 n_states: null
 timestep_fs: 2.0
+constraints: HBonds # One of: HBonds, AllBonds, HAngles, or null for no constraints
 com_restraint: false # Apply force to keep COM of peptide complexes together
 forcefield_files:
   - amber14-all.xml
