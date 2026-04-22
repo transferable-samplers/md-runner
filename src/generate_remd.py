@@ -47,12 +47,14 @@ SEQUENCE_N_STATES_OVERRIDES = {
 }
 
 
-def get_n_states(sequence: str) -> int:
+def get_n_states(sequence: str, mode: str = "auto") -> int:
     if sequence in SEQUENCE_N_STATES_OVERRIDES:
         return SEQUENCE_N_STATES_OVERRIDES[sequence]
     seq_len = len(sequence)
     if seq_len in N_STATES_DICT:
         possible_states = N_STATES_DICT[seq_len]
+        if mode == "auto-max":
+            return max(possible_states)
         if stable_hash(sequence) % 2 == 0:
             return possible_states[0]
         else:
@@ -255,9 +257,10 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     if not pdb_path.exists():
         raise FileNotFoundError(f"PDB file not found at {pdb_path}")
 
-    if str(cfg.n_states).lower() == "auto":
-        n_states = get_n_states(sequence)
-        logger.info(f"Auto-selected n_states={n_states} for sequence length {len(sequence)}")
+    if str(cfg.n_states).lower() in ("auto", "auto-max"):
+        mode = str(cfg.n_states).lower()
+        n_states = get_n_states(sequence, mode)
+        logger.info(f"{mode}-selected n_states={n_states} for sequence length {len(sequence)}")
     else:
         n_states = int(cfg.n_states)
         assert n_states > 1
