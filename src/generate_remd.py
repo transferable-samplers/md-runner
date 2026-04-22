@@ -37,7 +37,18 @@ N_STATES_DICT = {
 }
 
 
+SEQUENCE_N_STATES_OVERRIDES = {
+    # 14-mer polyA: auto-hash picked 8, exceeding the 16-mer's 7.
+    "AAAAAAAAAAAAAA": 7,
+    # Bumped +1 from auto-picked values due to low swap acceptance rates.
+    "RPKPQQFFGLM": 7,
+    "RPPGFSPFR": 6,
+}
+
+
 def get_n_states(sequence: str) -> int:
+    if sequence in SEQUENCE_N_STATES_OVERRIDES:
+        return SEQUENCE_N_STATES_OVERRIDES[sequence]
     seq_len = len(sequence)
     if seq_len in N_STATES_DICT:
         possible_states = N_STATES_DICT[seq_len]
