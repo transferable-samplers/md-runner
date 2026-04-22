@@ -6,7 +6,7 @@
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
-#SBATCH --array=0-7
+#SBATCH --array=0-2
 #SBATCH --open-mode=append
 #SBATCH --requeue
 #SBATCH --signal=SIGUSR1@90
@@ -19,7 +19,7 @@ echo "SLURM array ID: $SLURM_ARRAY_TASK_ID"
 # ============================
 # Configuration
 # ============================
-SEQ_FILE="sequences/big_eval.txt"
+SEQ_FILE="sequences/xl.txt"
 TIME_NS=5000           # <-- 5 us reference run
 
 TOTAL_PER_JOB=4        # <-- N total sequences handled by this slurm task
@@ -64,7 +64,7 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     break
   fi
   echo "Launching seq_idx=$IDX"
-  python src/generate_remd.py seq_idx=$IDX seq_filename="$SEQ_FILE" n_states=auto time_ns=$TIME_NS constraints=null timestep_fs=1.0 frame_interval=5000 paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-big_eval &
+  python src/generate_remd.py seq_idx=$IDX seq_filename="$SEQ_FILE" n_states=auto time_ns=$TIME_NS constraints=null timestep_fs=1.0 frame_interval=5000 paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-xl &
 
   running=$(( running + 1 ))
   if [ "$running" -ge "$MAX_CONCURRENT" ]; then
