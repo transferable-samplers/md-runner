@@ -433,7 +433,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
                 box_vectors=sampler_state.box_vectors,
             )
         sampler.create(thermodynamic_states, [sampler_state] * n_states, reporter)
-        reporter._storage_checkpoint.is_minimized = bool(cfg.get("scramble", False))
+        reporter._storage_checkpoint.is_minimized = int(cfg.get("scramble", False))
         reporter._storage_checkpoint.is_equilibrated = 0
         reporter.sync()
         is_minimized = bool(cfg.get("scramble", False))
