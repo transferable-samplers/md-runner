@@ -7,8 +7,8 @@ import numpy as np
 import openmm
 import rootutils
 from omegaconf import DictConfig
-from openmm import CustomCentroidBondForce, Platform, unit
-from openmm.app import ForceField, PDBFile
+from openmm import CustomCentroidBondForce, LangevinMiddleIntegrator, Platform, unit
+from openmm.app import ForceField, PDBFile, Simulation
 from openmmtools import mcmc, multistate, states
 from openmmtools.cache import global_context_cache
 
@@ -161,7 +161,89 @@ def setup_platform(cfg):
     platform = Platform.getPlatform(cfg.platform_name)
     global_context_cache.set_platform(platform, platform_properties)
     logger.info(f"Platform name: {cfg.platform_name} properties: {platform_properties}")
-    return None
+    return platform, platform_properties
+
+
+def thermal_scramble(
+    topology,
+    system,
+    positions,
+    platform,
+    platform_properties,
+    cfg,
+):
+    """Heat-cool cycle to produce a decorrelated starting structure before REMD.
+
+    Protocol:
+      1. Minimize, assign velocities at target_temp with scramble_seed.
+      2. Ramp target_temp -> scramble_high_temp over scramble_ramp_up_ps.
+      3. Hold at scramble_high_temp for scramble_hold_ps to cross barriers.
+      4. Ramp back to target_temp over scramble_ramp_down_ps (gradual, not a quench).
+      5. Re-equilibrate at target_temp for scramble_equilibrate_ps.
+
+    The scrambling trajectory is not equilibrium sampling; only the final snapshot is returned.
+    """
+    target_T = cfg.min_temp * unit.kelvin
+    high_T = cfg.scramble_high_temp * unit.kelvin
+    dt = cfg.timestep_fs * unit.femtosecond
+    steps_per_ps = int(round(1000.0 / cfg.timestep_fs))
+    update_steps = max(1, int(round(cfg.scramble_ramp_update_ps * steps_per_ps)))
+
+    integrator = LangevinMiddleIntegrator(target_T, 1.0 / unit.picosecond, dt)
+    integrator.setRandomNumberSeed(int(cfg.scramble_seed))
+
+    simulation = Simulation(
+        topology,
+        system,
+        integrator,
+        platform=platform,
+        platformProperties=platform_properties,
+    )
+    simulation.context.setPositions(positions)
+    simulation.minimizeEnergy()
+    simulation.context.setVelocitiesToTemperature(target_T, int(cfg.scramble_seed))
+
+    def ramp(t_start, t_end, duration_ps):
+        total_steps = int(round(duration_ps * steps_per_ps))
+        if total_steps <= 0:
+            return
+        n_updates = max(1, total_steps // update_steps)
+        t0 = t_start.value_in_unit(unit.kelvin)
+        t1 = t_end.value_in_unit(unit.kelvin)
+        steps_done = 0
+        for i in range(n_updates):
+            frac = (i + 1) / n_updates
+            T = (t0 + frac * (t1 - t0)) * unit.kelvin
+            integrator.setTemperature(T)
+            n_steps = update_steps if i < n_updates - 1 else total_steps - steps_done
+            simulation.step(n_steps)
+            steps_done += n_steps
+
+    logger.info(
+        f"Thermal scramble (seed={cfg.scramble_seed}): "
+        f"{cfg.min_temp}K -> {cfg.scramble_high_temp}K over {cfg.scramble_ramp_up_ps} ps, "
+        f"hold {cfg.scramble_hold_ps} ps, cool over {cfg.scramble_ramp_down_ps} ps, "
+        f"equilibrate {cfg.scramble_equilibrate_ps} ps.",
+    )
+
+    ramp(target_T, high_T, cfg.scramble_ramp_up_ps)
+
+    integrator.setTemperature(high_T)
+    hold_steps = int(round(cfg.scramble_hold_ps * steps_per_ps))
+    if hold_steps > 0:
+        simulation.step(hold_steps)
+
+    ramp(high_T, target_T, cfg.scramble_ramp_down_ps)
+
+    integrator.setTemperature(target_T)
+    equib_steps = int(round(cfg.scramble_equilibrate_ps * steps_per_ps))
+    if equib_steps > 0:
+        simulation.step(equib_steps)
+
+    state = simulation.context.getState(getPositions=True)
+    final_positions = state.getPositions(asNumpy=True)
+    logger.info("Thermal scramble complete.")
+    return final_positions
 
 
 def save_swap_rates(reporter, output_dir: Path, sequence: str):
@@ -265,12 +347,18 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         n_states = int(cfg.n_states)
         assert n_states > 1
 
-    output_dir = (
-        Path(cfg.paths.data_dir)
-        / "remd"
-        / f"{sequence}_{int(cfg.min_temp)}K-{int(cfg.max_temp)}K_{n_states}_{cfg.timestep_fs}_{cfg.frame_interval}"
-    )
-    setup_platform(cfg)
+    run_name = f"{sequence}_{int(cfg.min_temp)}K-{int(cfg.max_temp)}K_{n_states}_{cfg.timestep_fs}_{cfg.frame_interval}"
+    if cfg.get("scramble", False):
+        run_name += f"_scramble{int(cfg.scramble_seed)}"
+    output_dir = Path(cfg.paths.data_dir) / "remd" / run_name
+
+    # Seed numpy (used by openmmtools for swap-acceptance decisions and other stochastic
+    # choices). OpenMM integrators have per-instance seeds; the scramble integrator is
+    # seeded explicitly below, and the REMD sampler's integrators fall back to OpenMM's
+    # default (OS-random), which we leave alone.
+    np.random.seed(int(cfg.scramble_seed))
+
+    platform, platform_properties = setup_platform(cfg)
 
     pdb = PDBFile(str(pdb_path))
     topology = pdb.getTopology()
@@ -329,11 +417,25 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         is_equilibrated = bool(getattr(reporter._storage_checkpoint, "is_equilibrated", 0))
     else:
         logger.info("Starting new REMD simulation from scratch")
+        if cfg.get("scramble", False):
+            scrambled_positions = thermal_scramble(
+                topology,
+                system,
+                positions,
+                platform,
+                platform_properties,
+                cfg,
+            )
+            PDBFile.writeFile(topology, scrambled_positions, str(output_dir / "scramble_snapshot.pdb"))
+            sampler_state = states.SamplerState(
+                positions=scrambled_positions,
+                box_vectors=sampler_state.box_vectors,
+            )
         sampler.create(thermodynamic_states, [sampler_state] * n_states, reporter)
-        reporter._storage_checkpoint.is_minimized = 0
+        reporter._storage_checkpoint.is_minimized = bool(cfg.get("scramble", False))
         reporter._storage_checkpoint.is_equilibrated = 0
         reporter.sync()
-        is_minimized = False
+        is_minimized = bool(cfg.get("scramble", False))
         is_equilibrated = False
 
     if not is_equilibrated:

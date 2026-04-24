@@ -26,3 +26,19 @@ warmup_time_ns: 0.5 # Warmup duration in nanoseconds
 frame_interval: 2_500 # How many integration steps between iterations (i.e. swap attempts and frame recordings)
 time_ns: 25.0 # Total simulation time in nanoseconds
 demultiplex: false # Extract per-state trajectories and swap rates after simulation
+
+# Thermal scrambling (simulated-annealing cycle) applied before REMD starts.
+# When enabled, the starting structure is heated, held hot to cross barriers, cooled
+# back to min_temp, and re-equilibrated. The post-equilibration snapshot is used for
+# all replicas. Use different scramble_seed values across runs to produce K
+# independent starting structures; verify decorrelation by pairwise RMSD of the saved
+# scramble_snapshot.pdb files (if they're all within ~1 A, push high_temp higher or
+# hold longer).
+scramble: false
+scramble_seed: 0
+scramble_high_temp: 450 # Kelvin; stay <= ~450 K to preserve native fold
+scramble_ramp_up_ps: 100 # heat min_temp -> scramble_high_temp
+scramble_hold_ps: 300 # hold hot to cross barriers (200-500 ps)
+scramble_ramp_down_ps: 150 # cool back to min_temp (gradual ramp, NOT an instant quench)
+scramble_equilibrate_ps: 150 # re-equilibrate at min_temp before emitting snapshot
+scramble_ramp_update_ps: 1.0 # ps between integrator.setTemperature calls during ramps
