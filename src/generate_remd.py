@@ -352,11 +352,12 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         run_name += f"_scramble{int(cfg.scramble_seed)}"
     output_dir = Path(cfg.paths.data_dir) / "remd" / run_name
 
-    # Seed numpy (used by openmmtools for swap-acceptance decisions and other stochastic
-    # choices). OpenMM integrators have per-instance seeds; the scramble integrator is
-    # seeded explicitly below, and the REMD sampler's integrators fall back to OpenMM's
-    # default (OS-random), which we leave alone.
-    np.random.seed(int(cfg.scramble_seed))
+    if cfg.get("scramble", False):
+        # Seed numpy (used by openmmtools for swap-acceptance decisions and other stochastic
+        # choices). OpenMM integrators have per-instance seeds; the scramble integrator is
+        # seeded explicitly below, and the REMD sampler's integrators fall back to OpenMM's
+        # default (OS-random), which we leave alone.
+        np.random.seed(int(cfg.scramble_seed))
 
     platform, platform_properties = setup_platform(cfg)
 
