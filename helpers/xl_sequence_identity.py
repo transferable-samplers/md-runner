@@ -10,6 +10,7 @@ Modes:
   --cutoff C        list/write PDBs with max identity to any target >= C
   --exclude-cutoff  remove PDBs with max identity >= cutoff, then show top hits
 """
+
 from __future__ import annotations
 
 import argparse
@@ -117,8 +118,7 @@ def _score(seq: str) -> list[float]:
     return [nw_identity(t, seq) for t in _TARGETS]
 
 
-def score_all(pdb_seqs: list[tuple[str, Path]], targets: list[str],
-              workers: int) -> list[list[float]]:
+def score_all(pdb_seqs: list[tuple[str, Path]], targets: list[str], workers: int) -> list[list[float]]:
     """Return identities[i][j] for pdb_seqs[i] vs targets[j]."""
     seqs_only = [s for s, _ in pdb_seqs]
     if workers <= 1:
@@ -130,26 +130,36 @@ def score_all(pdb_seqs: list[tuple[str, Path]], targets: list[str],
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description=__doc__,
-                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--targets", type=Path, default=DEFAULT_TARGETS)
-    ap.add_argument("--top", type=int, default=1,
-                    help="top-N matches per target (default: 1)")
-    ap.add_argument("--cutoff", type=float, default=None,
-                    help="redundancy-filter mode: count/write PDBs with max identity "
-                         ">= cutoff; writes drop_sequences.txt")
-    ap.add_argument("--exclude-cutoff", type=float, default=None,
-                    help="filter out PDBs with max identity >= cutoff, then show top hits")
-    ap.add_argument("--workers", type=int, default=int(os.environ.get("SLURM_CPUS_PER_TASK", "1")),
-                    help="parallel workers (default: $SLURM_CPUS_PER_TASK or 1)")
-    ap.add_argument("--drop-file", type=Path, default=REPO_ROOT / "drop_sequences.txt",
-                    help="output for --cutoff mode")
+    ap.add_argument("--top", type=int, default=1, help="top-N matches per target (default: 1)")
+    ap.add_argument(
+        "--cutoff",
+        type=float,
+        default=None,
+        help="redundancy-filter mode: count/write PDBs with max identity >= cutoff; writes drop_sequences.txt",
+    )
+    ap.add_argument(
+        "--exclude-cutoff",
+        type=float,
+        default=None,
+        help="filter out PDBs with max identity >= cutoff, then show top hits",
+    )
+    ap.add_argument(
+        "--workers",
+        type=int,
+        default=int(os.environ.get("SLURM_CPUS_PER_TASK", "1")),
+        help="parallel workers (default: $SLURM_CPUS_PER_TASK or 1)",
+    )
+    ap.add_argument("--drop-file", type=Path, default=REPO_ROOT / "drop_sequences.txt", help="output for --cutoff mode")
     args = ap.parse_args()
 
     targets = read_targets(args.targets)
     pdb_seqs = collect_pdb_sequences(PDB_DIRS)
-    print(f"loaded {len(targets)} targets and {len(pdb_seqs)} PDB sequences "
-          f"(workers={args.workers})\n", file=sys.stderr)
+    print(
+        f"loaded {len(targets)} targets and {len(pdb_seqs)} PDB sequences (workers={args.workers})\n",
+        file=sys.stderr,
+    )
 
     idents = score_all(pdb_seqs, targets, args.workers)
 
@@ -165,9 +175,10 @@ def main() -> int:
                 drop_seqs.append((seq, path, mx))
         print(f"cutoff: max identity to any xl target >= {args.cutoff}")
         for name, (drop, total) in sorted(by_dir.items()):
-            print(f"  {name:20s} drop {drop:>6}/{total:<6} ({100*drop/total:.2f}%)")
-        print(f"  {'TOTAL':20s} drop {len(drop_seqs):>6}/{len(pdb_seqs):<6} "
-              f"({100*len(drop_seqs)/len(pdb_seqs):.2f}%)")
+            print(f"  {name:20s} drop {drop:>6}/{total:<6} ({100 * drop / total:.2f}%)")
+        print(
+            f"  {'TOTAL':20s} drop {len(drop_seqs):>6}/{len(pdb_seqs):<6} ({100 * len(drop_seqs) / len(pdb_seqs):.2f}%)",
+        )
         with args.drop_file.open("w") as f:
             for seq, path, ident in sorted(drop_seqs, key=lambda r: -r[2]):
                 f.write(f"{seq}\t{ident:.4f}\t{path}\n")
@@ -178,13 +189,14 @@ def main() -> int:
     if args.exclude_cutoff is not None:
         keep_mask = [max(row) < args.exclude_cutoff for row in idents]
         kept = sum(keep_mask)
-        print(f"excluding PDBs with max identity >= {args.exclude_cutoff}: "
-              f"kept {kept}/{len(pdb_seqs)} "
-              f"({100*kept/len(pdb_seqs):.2f}%)\n")
+        print(
+            f"excluding PDBs with max identity >= {args.exclude_cutoff}: "
+            f"kept {kept}/{len(pdb_seqs)} "
+            f"({100 * kept / len(pdb_seqs):.2f}%)\n",
+        )
 
     for j, t in enumerate(targets):
-        scored = [(idents[i][j], pdb_seqs[i][0], pdb_seqs[i][1])
-                  for i in range(len(pdb_seqs)) if keep_mask[i]]
+        scored = [(idents[i][j], pdb_seqs[i][0], pdb_seqs[i][1]) for i in range(len(pdb_seqs)) if keep_mask[i]]
         scored.sort(key=lambda r: r[0], reverse=True)
         print(f"{t}")
         for ident, seq, path in scored[: args.top]:
