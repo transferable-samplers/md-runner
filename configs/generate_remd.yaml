@@ -25,6 +25,7 @@ forcefield_files:
 warmup_time_ns: 0.5 # Warmup duration in nanoseconds
 frame_interval: 2_500 # How many integration steps between iterations (i.e. swap attempts and frame recordings)
 time_ns: 25.0 # Total simulation time in nanoseconds
+exit_early_at_ns: null # If set, exit immediately on resume when existing run is already >= this many ns. Independent of time_ns; does not change the stored simulation cap.
 demultiplex: false # Extract per-state trajectories and swap rates after simulation
 
 # Thermal scrambling (simulated-annealing cycle) applied before REMD starts.

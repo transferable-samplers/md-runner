@@ -405,6 +405,29 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     nc_path = output_dir / "remd.nc"
     ckpt_path = output_dir / "remd_checkpoint.nc"
 
+    exit_early_at_ns = cfg.get("exit_early_at_ns", None)
+    if exit_early_at_ns is not None and nc_path.exists() and ckpt_path.exists():
+        probe = multistate.MultiStateReporter(
+            str(nc_path),
+            checkpoint_storage=str(ckpt_path),
+            open_mode="r",
+        )
+        try:
+            existing_iter = probe._storage_analysis.variables["states"].shape[0]
+        finally:
+            for s in (probe._storage_analysis, probe._storage_checkpoint, probe._storage):
+                try:
+                    s.close()
+                except Exception:
+                    pass
+        existing_ns = existing_iter * cfg.frame_interval * cfg.timestep_fs / 1e6
+        if existing_ns >= float(exit_early_at_ns):
+            logger.info(
+                f"Existing run at {existing_iter} iterations ({existing_ns:.2f} ns) "
+                f">= exit_early_at_ns={exit_early_at_ns} ns; exiting without resuming.",
+            )
+            return
+
     reporter = multistate.MultiStateReporter(
         nc_path,
         checkpoint_interval=1,  # Save coords and velocities every swap attempt
@@ -461,7 +484,17 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
             f"Warmup done, {warmup_iterations} iterations ({n_equib_ps:.2f} ps / {n_equib_ns:.3f} ns)",
         )
 
-    sampler.run()
+    if exit_early_at_ns is not None:
+        target_iter = int(float(exit_early_at_ns) * 1e6 / (cfg.frame_interval * cfg.timestep_fs))
+        current_iter = sampler.iteration or 0
+        remaining = max(0, target_iter - current_iter)
+        logger.info(
+            f"exit_early_at_ns={exit_early_at_ns} ns -> target_iter={target_iter}; "
+            f"current_iter={current_iter}, running up to {remaining} more iterations.",
+        )
+        sampler.run(n_iterations=remaining)
+    else:
+        sampler.run()
 
     save_swap_rates(reporter, output_dir, sequence)
     # NOTE: Demultiplexing is CPU-bound and may waste GPU time; some may prefer to do this as a post-processing step
