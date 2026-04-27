@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH -J generate_remd_mps_pdbs_4aa
+#SBATCH -J generate_remd_pdbs_4aa_scramble
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
 #SBATCH -t 48:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
-#SBATCH --array=0-7
+#SBATCH --array=0-15
 #SBATCH --open-mode=append
 #SBATCH --requeue
 #SBATCH --signal=SIGUSR1@90
@@ -25,6 +25,35 @@ TIME_NS=1000           # <-- 1 us for 4AA sequences
 TOTAL_PER_JOB=4        # <-- N total sequences handled by this slurm task
 MAX_CONCURRENT=4        # <-- at most 4 python processes at a time
 TOTAL_SEQS=$(wc -l < "$SEQ_FILE")
+
+# Seeds to run (one seed per REMD run, different velocity seed -> different
+# post-scramble starting structure). Array layout: one task per (seed, block).
+SEEDS=(1 2)
+BLOCKS=(0 1 2 3 4 5 6 7)        # must match the original run_pdbs_4aa.sh sequence coverage
+N_SEEDS=${#SEEDS[@]}
+N_BLOCKS=${#BLOCKS[@]}
+
+# Thermal scramble parameters.
+SCRAMBLE_HIGH_TEMP=600
+SCRAMBLE_RAMP_UP_PS=1000
+SCRAMBLE_HOLD_PS=1000
+SCRAMBLE_RAMP_DOWN_PS=5000
+SCRAMBLE_EQUILIBRATE_PS=1000
+
+# ----------------------------
+# Map array task -> (seed, block)
+# ----------------------------
+SEED_IDX=$(( SLURM_ARRAY_TASK_ID / N_BLOCKS ))
+BLOCK_IDX=$(( SLURM_ARRAY_TASK_ID % N_BLOCKS ))
+if [ "$SEED_IDX" -ge "$N_SEEDS" ]; then
+  echo "SLURM_ARRAY_TASK_ID=$SLURM_ARRAY_TASK_ID exceeds seed*block grid; exiting."
+  exit 0
+fi
+SEED=${SEEDS[$SEED_IDX]}
+BLOCK=${BLOCKS[$BLOCK_IDX]}
+BASE_IDX=$(( BLOCK * TOTAL_PER_JOB ))
+
+echo "Seed=$SEED  block=$BLOCK  base_idx=$BASE_IDX"
 
 # ============================
 # Start CUDA MPS
@@ -47,12 +76,9 @@ nvidia-cuda-mps-control -d
 echo "MPS server started at $CUDA_MPS_PIPE_DIRECTORY"
 
 # ----------------------------
-# Sequence indexing
+# Launch sequences for this (seed, block)
 # ----------------------------
-# Each array task handles a block of TOTAL_PER_JOB sequences
-BASE_IDX=$(( SLURM_ARRAY_TASK_ID * TOTAL_PER_JOB ))
-
-echo "Launching up to $TOTAL_PER_JOB sequences starting at idx=$BASE_IDX"
+echo "Launching up to $TOTAL_PER_JOB sequences starting at idx=$BASE_IDX with seed=$SEED"
 echo "Concurrency cap: $MAX_CONCURRENT"
 
 running=0
@@ -63,8 +89,24 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     echo "Reached end of sequence file (idx=$IDX >= $TOTAL_SEQS); stopping launches."
     break
   fi
-  echo "Launching seq_idx=$IDX"
-  python src/generate_remd.py seq_idx=$IDX seq_filename="$SEQ_FILE" n_states=auto-max time_ns=$TIME_NS constraints=null timestep_fs=1.0 frame_interval=5000 paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-many exit_early_at_ns=500 &
+  echo "Launching seq_idx=$IDX seed=$SEED"
+  python src/generate_remd.py \
+    seq_idx=$IDX \
+    seq_filename="$SEQ_FILE" \
+    n_states=auto-max \
+    time_ns=$TIME_NS \
+    constraints=null \
+    timestep_fs=1.0 \
+    frame_interval=5000 \
+    scramble=true \
+    scramble_seed=$SEED \
+    scramble_high_temp=$SCRAMBLE_HIGH_TEMP \
+    scramble_ramp_up_ps=$SCRAMBLE_RAMP_UP_PS \
+    scramble_hold_ps=$SCRAMBLE_HOLD_PS \
+    scramble_ramp_down_ps=$SCRAMBLE_RAMP_DOWN_PS \
+    scramble_equilibrate_ps=$SCRAMBLE_EQUILIBRATE_PS \
+    exit_early_at_ns=500 \
+    paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-many &
 
   running=$(( running + 1 ))
   if [ "$running" -ge "$MAX_CONCURRENT" ]; then

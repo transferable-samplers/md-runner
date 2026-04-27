@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH -J generate_remd_reference_xl_scramble
+#SBATCH -J generate_remd_pdbs_8aa_scramble
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
 #SBATCH -t 48:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
-#SBATCH --array=0-11
+#SBATCH --array=0-15
 #SBATCH --open-mode=append
 #SBATCH --requeue
 #SBATCH --signal=SIGUSR1@90
@@ -19,8 +19,8 @@ echo "SLURM array ID: $SLURM_ARRAY_TASK_ID"
 # ============================
 # Configuration
 # ============================
-SEQ_FILE="sequences/xl.txt"
-TIME_NS=5000           # <-- 5 us reference run
+SEQ_FILE="sequences/pdbs_8aa.txt"
+TIME_NS=2000           # <-- 2 us for 8AA sequences
 
 TOTAL_PER_JOB=4        # <-- N total sequences handled by this slurm task
 MAX_CONCURRENT=4        # <-- at most 4 python processes at a time
@@ -28,8 +28,8 @@ TOTAL_SEQS=$(wc -l < "$SEQ_FILE")
 
 # Seeds to run (one seed per REMD run, different velocity seed -> different
 # post-scramble starting structure). Array layout: one task per (seed, block).
-SEEDS=(1 2 3 4)
-BLOCKS=(0 1 2)        # must match the original run_xl.sh sequence coverage
+SEEDS=(1 2)
+BLOCKS=(0 1 2 3 4 5 6 7)        # must match the original run_pdbs_8aa.sh sequence coverage
 N_SEEDS=${#SEEDS[@]}
 N_BLOCKS=${#BLOCKS[@]}
 
@@ -93,7 +93,7 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
   python src/generate_remd.py \
     seq_idx=$IDX \
     seq_filename="$SEQ_FILE" \
-    n_states=auto \
+    n_states=auto-max \
     time_ns=$TIME_NS \
     constraints=null \
     timestep_fs=1.0 \
@@ -106,7 +106,7 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     scramble_ramp_down_ps=$SCRAMBLE_RAMP_DOWN_PS \
     scramble_equilibrate_ps=$SCRAMBLE_EQUILIBRATE_PS \
     exit_early_at_ns=500 \
-    paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-xl &
+    paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-many &
 
   running=$(( running + 1 ))
   if [ "$running" -ge "$MAX_CONCURRENT" ]; then
