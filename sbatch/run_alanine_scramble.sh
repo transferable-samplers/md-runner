@@ -2,7 +2,7 @@
 #SBATCH -J generate_remd_alanine_scramble
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
-#SBATCH -t 24:00:00
+#SBATCH -t 72:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
@@ -105,7 +105,7 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     scramble_hold_ps=$SCRAMBLE_HOLD_PS \
     scramble_ramp_down_ps=$SCRAMBLE_RAMP_DOWN_PS \
     scramble_equilibrate_ps=$SCRAMBLE_EQUILIBRATE_PS \
-    exit_early_at_ns=500 \
+    exit_early_at_ns=1000 \
     paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-alanine &
 
   running=$(( running + 1 ))

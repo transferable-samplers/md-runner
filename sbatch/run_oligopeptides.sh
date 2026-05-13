@@ -2,7 +2,7 @@
 #SBATCH -J generate_remd_mps
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=32G
-#SBATCH -t 24:00:00
+#SBATCH -t 72:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:1
 #SBATCH -c 8
