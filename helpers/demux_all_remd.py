@@ -130,6 +130,12 @@ def main() -> None:
         help="Only process runs whose directory name contains this string.",
     )
     p.add_argument(
+        "--exact-sequence",
+        action="store_true",
+        help="Treat --sequence as the exact leading token (run.name.split('_')[0]) "
+        "instead of a substring. Needed to isolate poly-A sequences (AA vs AAAA).",
+    )
+    p.add_argument(
         "--stride",
         type=int,
         default=1,
@@ -172,7 +178,10 @@ def main() -> None:
 
         runs = find_remd_runs(root)
         if args.sequence:
-            runs = [r for r in runs if args.sequence in r.name]
+            if args.exact_sequence:
+                runs = [r for r in runs if r.name.split("_")[0] == args.sequence]
+            else:
+                runs = [r for r in runs if args.sequence in r.name]
         if not runs:
             print(f"# no runs under {root}")
             continue
