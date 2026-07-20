@@ -15,7 +15,7 @@ set -euo pipefail
 echo "Node: $HOSTNAME"
 echo "SLURM array ID: $SLURM_ARRAY_TASK_ID"
 
-OUT_DIR=/network/scratch/t/tanc/remd-final
+OUT_DIR=/network/scratch/t/tanc/remd-final-2
 
 # Build the manifest once (idempotent); each task reads its own line.
 # Line N (0-based) == SLURM_ARRAY_TASK_ID -> "<subset>\t<sequence>".
