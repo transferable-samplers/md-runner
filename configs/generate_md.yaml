@@ -19,3 +19,13 @@ frame_interval: 1_000 # How many integration steps between recorded frames (each
 time_ns: 50.0 # Total simulation time in nanoseconds
 log_freq: 100 # How often to log simulation data (in integration steps)
 frames_per_chunk: 1_000 # How many frames to save at once, shape (frames_per_chunk, num_atoms, 3)
+
+# Optional chirality/omega flat-bottom restraints (see src/generate_remd.py and
+# configs/generate_remd.yaml for the full rationale/derivation). Off by default so this
+# stays a bare unrestrained MD runner; defaults below match generate_remd.yaml.
+chirality_restraint: false
+chirality_tol_deg: 25.0
+chirality_k_kcal: 576.5
+omega_restraint: false
+omega_tol_deg: 80.0
+omega_k_kcal: 576.5

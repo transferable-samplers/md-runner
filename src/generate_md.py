@@ -35,9 +35,10 @@ from omegaconf import DictConfig
 from openmm import Platform, XmlSerializer
 from openmm.app import ForceField, PDBFile, Simulation, StateDataReporter
 
-from src.utils import get_md_output_dir
-
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+
+from src.generate_remd import add_chirality_restraints, add_omega_restraints  # noqa: E402
+from src.utils import get_md_output_dir  # noqa: E402
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -130,6 +131,21 @@ def generate_md(cfg: DictConfig) -> None:  # noqa: C901
         nonbondedCutoff=2.0 * openmm.unit.nanometer,
         constraints=None,
     )
+    if cfg.get("chirality_restraint", False):
+        add_chirality_restraints(
+            system,
+            topology,
+            positions,
+            tol=cfg.get("chirality_tol_deg", 25.0) * openmm.unit.degree,
+            k=cfg.get("chirality_k_kcal", 576.5) * openmm.unit.kilocalories_per_mole / openmm.unit.radian**2,
+        )
+    if cfg.get("omega_restraint", False):
+        add_omega_restraints(
+            system,
+            topology,
+            tol=cfg.get("omega_tol_deg", 80.0) * openmm.unit.degree,
+            k=cfg.get("omega_k_kcal", 576.5) * openmm.unit.kilocalories_per_mole / openmm.unit.radian**2,
+        )
     integrator = openmm.LangevinMiddleIntegrator(
         cfg.temperature * openmm.unit.kelvin,
         0.3 / openmm.unit.picosecond,

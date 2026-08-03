@@ -105,7 +105,7 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     scramble_hold_ps=$SCRAMBLE_HOLD_PS \
     scramble_ramp_down_ps=$SCRAMBLE_RAMP_DOWN_PS \
     scramble_equilibrate_ps=$SCRAMBLE_EQUILIBRATE_PS \
-    exit_early_at_ns=1000 \
+    exit_early_at_ns=5000 \
     paths.scratch_dir=/network/scratch/t/tanc/md-runner-remd-reference-alanine &
 
   running=$(( running + 1 ))

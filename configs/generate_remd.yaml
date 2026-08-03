@@ -19,6 +19,38 @@ n_states: null
 timestep_fs: 2.0
 constraints: HBonds # One of: HBonds, AllBonds, HAngles, or null for no constraints
 com_restraint: false # Apply force to keep COM of peptide complexes together
+
+# Flat-bottom improper restraints preventing unphysical Calpha (and Thr/Ile Cbeta)
+# stereocenter inversion -- a rare artifact at high temperature (scramble hold, top REMD
+# rungs). Every stereocenter gets two impropers, one through its heavy-atom substituent at
+# +35 deg and one through its hydrogen substituent at -35 deg (e.g. Calpha:
+# (CA,N,C,CB)=+35/(CA,N,C,HA)=-35; Thr/Ile Cbeta: (CB,CA,OG1/CG1,CG2)=+35/(...,HB)=-35) -- a
+# fixed tetrahedral-geometry convention reference, not one read from the starting structure
+# (empirically confirmed for the Calpha term: native impropers cluster at ~35.3 deg
+# regardless of residue/sequence; expected to hold to the same approximation for Thr/Ile).
+# tol/k match the reference formula exactly (Eq 18: phi0=35 deg, phitol=25 deg,
+# kappa=25 eV/rad^2 = 576.5 kcal/mol/rad^2). tol=25 < phi0=35 keeps the flat-zone floor
+# (phi0-tol=10 deg) clear of the planar/inversion point (0 deg) -- a wider tol would let the
+# dihedral cross planar with zero restraint force before the wall engages. Validated at
+# 800K/1200K against an unrestrained hot-MD run (see src/measure_dihedral_spread.py).
+chirality_restraint: false
+chirality_tol_deg: 25.0 # Half-width of the flat zone (deg) -- matches reference phitol; measured 3*std is ~15-19 deg at 800-1200K
+chirality_k_kcal: 576.5 # kcal/mol/rad^2 outside the flat zone (25 eV/rad^2)
+
+# Optional flat-bottom restraint on non-proline omega dihedrals (CA_i-C_i-N_{i+1}-CA_{i+1}),
+# walling off the cis flip that otherwise becomes a spurious slow mode. X-Pro omega bonds
+# are left unrestrained (they naturally sample some cis population).
+#
+# tol/k empirically validated at 800K/1200K against an unrestrained hot-MD run (see
+# src/measure_dihedral_spread.py): pooled 3*std is ~58 deg at 800K and ~80 deg at 1200K, and
+# signed deviations confirm genuine full trans->cis excursions occur at both temperatures.
+# tol=80 sits right at the 1200K 3*std line (a proper flat-bottom restraint should leave the
+# bulk of normal thermal fluctuation untouched and only wall off the tail); k=576.5 kcal/mol/rad^2
+# (= 25 eV/rad^2, matching chirality_k_kcal) keeps the wall effectively impassable just past
+# that edge despite the modest tol.
+omega_restraint: false
+omega_tol_deg: 80.0 # Half-width (deg) around the trans value (180 deg).
+omega_k_kcal: 576.5 # kcal/mol/rad^2 outside the flat zone (25 eV/rad^2)
 forcefield_files:
   - amber14-all.xml
   - implicit/obc1.xml

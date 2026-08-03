@@ -7,7 +7,7 @@ import numpy as np
 import openmm
 import rootutils
 from omegaconf import DictConfig
-from openmm import CustomCentroidBondForce, LangevinMiddleIntegrator, Platform, unit
+from openmm import CustomCentroidBondForce, CustomTorsionForce, LangevinMiddleIntegrator, Platform, unit
 from openmm.app import ForceField, PDBFile, Simulation
 from openmmtools import mcmc, multistate, states
 from openmmtools.cache import global_context_cache
@@ -35,6 +35,19 @@ N_STATES_DICT = {
     19: (8, 9),
     20: (8, 9),
     24: (10, 10),
+}
+
+
+# n_states for a hot equilibration ladder up to max_temp=1000K (vs the production default's
+# 450K), sized to preserve each length's current 300-450K per-rung geometric ratio (the one
+# empirically tuned to ~30-35% swap acceptance in N_STATES_DICT) out to 1000K. Only covers up
+# to 8AA -- extend by re-running the same extrapolation against N_STATES_DICT's longer entries
+# if/when needed.
+N_STATES_DICT_EVAL = {
+    2: (10, 10),
+    4: (10, 10),
+    6: (13, 13),
+    8: (13, 13),
 }
 
 
@@ -124,6 +137,168 @@ def add_com_restraint(
     system.addForce(force)
 
 
+def _dihedral_angle(p0, p1, p2, p3):
+    """Torsion angle (radians, matching OpenMM's atan2 convention) for four raw position vectors."""
+    b0 = p0 - p1
+    b1 = p2 - p1
+    b2 = p3 - p2
+    b1 = b1 / np.linalg.norm(b1)
+    v = b0 - np.dot(b0, b1) * b1
+    w = b2 - np.dot(b2, b1) * b1
+    x = np.dot(v, w)
+    y = np.dot(np.cross(b1, v), w)
+    return np.arctan2(y, x)
+
+
+def _residue_atom_indices(residue):
+    return {atom.name: atom.index for atom in residue.atoms()}
+
+
+# Flat-bottom well on a periodic-wrapped angle difference: min(dtheta, 2*pi-dtheta) rather
+# than a raw |theta-theta0|, since theta wraps at +-pi. This matters whenever theta0 sits
+# near the wrap boundary (e.g. omega's trans value of pi) -- a naive difference would
+# otherwise place a spurious energy wall in the middle of the intended well.
+FLAT_BOTTOM_TORSION_EXPR = "0.5*k*max(0, min(dtheta, twopi-dtheta) - tol)^2; dtheta = abs(theta-theta0)"
+
+
+def _flat_bottom_torsion_force():
+    force = CustomTorsionForce(FLAT_BOTTOM_TORSION_EXPR)
+    force.addGlobalParameter("twopi", 2 * np.pi)
+    force.addPerTorsionParameter("theta0")
+    force.addPerTorsionParameter("tol")
+    force.addPerTorsionParameter("k")
+    return force
+
+
+# (Calpha,N,C,Cbeta)/(Calpha,N,C,Halpha) improper convention: for L-amino acids in ideal
+# tetrahedral geometry these sit at +35/-35 deg respectively, essentially independent of
+# residue identity or sequence (confirmed empirically: native impropers cluster at ~35.3 deg
+# across a real test peptide). Matches the two-term restraint construction in the reference
+# formula (Eq 18): U_imp(Ca,N,C,Cb; +phi0) + U_imp(Ca,N,C,Ha; -phi0).
+CHIRALITY_PHI0 = 35.0 * unit.degree
+
+
+def add_chirality_restraints(
+    system,
+    topology,
+    positions,
+    tol=25.0 * unit.degree,
+    k=576.5 * unit.kilocalories_per_mole / unit.radian**2,
+):
+    """Flat-bottom improper restraints preventing unphysical Calpha and Thr/Ile Cbeta
+    stereocenter inversion.
+
+    Every stereocenter gets two impropers: one through its heavy-atom substituent at
+    +CHIRALITY_PHI0, one through its hydrogen substituent at -CHIRALITY_PHI0, mirroring the
+    (Calpha,N,C,Cbeta)/(Calpha,N,C,Halpha) two-term construction from the reference formula
+    (Eq 18). CHIRALITY_PHI0=35 deg is a fixed tetrahedral-geometry convention value, not read
+    per-residue from the native structure -- confirmed empirically for the backbone term
+    (native impropers cluster at ~35.3 deg regardless of residue/sequence), and expected to
+    hold to the same approximation for Thr/Ile's Cbeta stereocenter for the same underlying
+    reason (ideal tetrahedral bond angles dominate; bond-length differences between
+    substituents are a second-order effect). Gly is skipped (no Cbeta/chirality).
+
+    A hard sanity check compares every native improper against +-CHIRALITY_PHI0; a large
+    deviation means atom ordering got permuted for that residue -- silent and nasty
+    otherwise, so this is a failure rather than a warning.
+
+    Defaults (tol=25 deg, k=576.5 kcal/mol/rad^2 = 25 eV/rad^2) match the reference formula
+    (Eq 18) exactly: phi0=35 deg, phitol=25 deg, kappa=25 eV/rad^2. tol=25 sits below phi0=35,
+    so the flat zone floor (phi0-tol=10 deg) stays clear of the planar/inversion point (0 deg)
+    -- unlike a wider tol, which would let the dihedral cross planar with zero restraint force
+    before the wall ever engages.
+    """
+    pos = np.array(positions.value_in_unit(unit.nanometer))
+    phi0_rad = CHIRALITY_PHI0.value_in_unit(unit.radian)
+
+    entries = []  # (kind, atom_quad, theta0_rad)
+    for residue in topology.residues():
+        if residue.name == "GLY":
+            continue
+        atoms = _residue_atom_indices(residue)
+        if not {"N", "CA", "C", "CB"} <= atoms.keys():
+            continue
+        # Atom order (stereocenter, ref1, ref2, test-substituent): heavy-atom substituent ->
+        # +phi0, hydrogen substituent -> -phi0.
+        entries.append(("CA", (atoms["CA"], atoms["N"], atoms["C"], atoms["CB"]), phi0_rad))
+        if "HA" in atoms:
+            entries.append(("HA", (atoms["CA"], atoms["N"], atoms["C"], atoms["HA"]), -phi0_rad))
+        if residue.name == "THR" and {"OG1", "CG2"} <= atoms.keys():
+            entries.append(("THR_CB", (atoms["CB"], atoms["CA"], atoms["OG1"], atoms["CG2"]), phi0_rad))
+            if "HB" in atoms:
+                entries.append(("THR_HB", (atoms["CB"], atoms["CA"], atoms["OG1"], atoms["HB"]), -phi0_rad))
+        elif residue.name == "ILE" and {"CG1", "CG2"} <= atoms.keys():
+            entries.append(("ILE_CB", (atoms["CB"], atoms["CA"], atoms["CG1"], atoms["CG2"]), phi0_rad))
+            if "HB" in atoms:
+                entries.append(("ILE_HB", (atoms["CB"], atoms["CA"], atoms["CG1"], atoms["HB"]), -phi0_rad))
+
+    if not entries:
+        return
+
+    # Sanity check: every native improper should sit close to the fixed +-CHIRALITY_PHI0
+    # convention value. A large deviation means atom ordering got permuted for that residue --
+    # silent and nasty otherwise, so this is a hard failure rather than a warning.
+    for kind, quad, theta0 in entries:
+        native_theta0 = np.degrees(_dihedral_angle(*(pos[i] for i in quad)))
+        expected = np.degrees(theta0)
+        if abs(native_theta0 - expected) > 15.0:
+            raise ValueError(
+                f"Native {kind} chirality improper is {native_theta0:.1f} deg, expected ~{expected:.1f} deg -- "
+                "check atom ordering for the offending residue.",
+            )
+
+    force = _flat_bottom_torsion_force()
+    tol_rad = tol.value_in_unit(unit.radian)
+    k_val = k.value_in_unit(unit.kilojoule_per_mole / unit.radian**2)
+    for _, quad, theta0 in entries:
+        force.addTorsion(*quad, [theta0, tol_rad, k_val])
+
+    system.addForce(force)
+    logger.info(f"Added {len(entries)} chirality flat-bottom restraints (tol={tol}, k={k}).")
+
+
+def add_omega_restraints(
+    system,
+    topology,
+    tol=80.0 * unit.degree,
+    k=576.5 * unit.kilocalories_per_mole / unit.radian**2,
+):
+    """Flat-bottom restraint on non-proline omega dihedrals (CA_i-C_i-N_{i+1}-CA_{i+1}),
+    centered on the trans value (pi). X-Pro omega bonds are left unrestrained since they
+    naturally sample some cis population.
+
+    Defaults (tol=80 deg, k=576.5 kcal/mol/rad^2 = 25 eV/rad^2) are sized against an
+    unrestrained hot-MD run at 800K/1200K (see src/measure_dihedral_spread.py): pooled 3*std
+    is ~58 deg at 800K and ~80 deg at 1200K, so tol=80 sits right at the hottest rung's 3*std
+    line, leaving normal thermal fluctuation untouched and walling off only the tail; the
+    stiff k keeps that wall effectively impassable just past the edge.
+    """
+    quads = []
+    for chain in topology.chains():
+        residues = list(chain.residues())
+        for i in range(len(residues) - 1):
+            res_i, res_j = residues[i], residues[i + 1]
+            if res_j.name == "PRO":
+                continue
+            atoms_i = _residue_atom_indices(res_i)
+            atoms_j = _residue_atom_indices(res_j)
+            if not ({"CA", "C"} <= atoms_i.keys() and {"N", "CA"} <= atoms_j.keys()):
+                continue
+            quads.append((atoms_i["CA"], atoms_i["C"], atoms_j["N"], atoms_j["CA"]))
+
+    if not quads:
+        return
+
+    force = _flat_bottom_torsion_force()
+    tol_rad = tol.value_in_unit(unit.radian)
+    k_val = k.value_in_unit(unit.kilojoule_per_mole / unit.radian**2)
+    for quad in quads:
+        force.addTorsion(*quad, [np.pi, tol_rad, k_val])
+
+    system.addForce(force)
+    logger.info(f"Added {len(quads)} omega flat-bottom restraints (tol={tol}, k={k}).")
+
+
 CONSTRAINT_MAP = {
     None: None,
     "None": None,
@@ -139,7 +314,19 @@ def resolve_constraints(constraints):
     raise ValueError(f"Unknown constraints value {constraints!r}; expected one of {list(CONSTRAINT_MAP)}")
 
 
-def get_system(topology, forcefield_files, com_restraint=False, constraints="HBonds"):
+def get_system(
+    topology,
+    forcefield_files,
+    com_restraint=False,
+    constraints="HBonds",
+    positions=None,
+    chirality_restraint=False,
+    chirality_tol=25.0 * unit.degree,
+    chirality_k=576.5 * unit.kilocalories_per_mole / unit.radian**2,
+    omega_restraint=False,
+    omega_tol=80.0 * unit.degree,
+    omega_k=576.5 * unit.kilocalories_per_mole / unit.radian**2,
+):
     forcefield = ForceField(*forcefield_files)
     system = forcefield.createSystem(
         topology,
@@ -149,6 +336,11 @@ def get_system(topology, forcefield_files, com_restraint=False, constraints="HBo
     )
     if com_restraint:
         add_com_restraint(system, topology)
+    if chirality_restraint:
+        assert positions is not None, "positions are required to set native chirality restraint reference angles"
+        add_chirality_restraints(system, topology, positions, tol=chirality_tol, k=chirality_k)
+    if omega_restraint:
+        add_omega_restraints(system, topology, tol=omega_tol, k=omega_k)
     return system
 
 
@@ -370,7 +562,19 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     # time_ns * 1e6 fs/ns = total time in fs = num_frames * frame_interval * timestep_fs
     num_frames = int(cfg.time_ns * 1e6 / (cfg.frame_interval * cfg.timestep_fs))
 
-    system = get_system(topology, cfg.forcefield_files, cfg.com_restraint, cfg.get("constraints", "HBonds"))
+    system = get_system(
+        topology,
+        cfg.forcefield_files,
+        cfg.com_restraint,
+        cfg.get("constraints", "HBonds"),
+        positions=positions,
+        chirality_restraint=cfg.get("chirality_restraint", False),
+        chirality_tol=cfg.get("chirality_tol_deg", 25.0) * unit.degree,
+        chirality_k=cfg.get("chirality_k_kcal", 576.5) * unit.kilocalories_per_mole / unit.radian**2,
+        omega_restraint=cfg.get("omega_restraint", False),
+        omega_tol=cfg.get("omega_tol_deg", 80.0) * unit.degree,
+        omega_k=cfg.get("omega_k_kcal", 576.5) * unit.kilocalories_per_mole / unit.radian**2,
+    )
 
     temperatures = geometric_temps(cfg.min_temp * unit.kelvin, cfg.max_temp * unit.kelvin, n_states)
     logger.info(
