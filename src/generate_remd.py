@@ -68,18 +68,18 @@ SEQUENCE_N_STATES_OVERRIDES = {
 # SEQUENCE_N_STATES_OVERRIDES-bumped production value (7/6), not the raw hash-auto pick,
 # since the override was there to fix low swap acceptance and that concern still applies here.
 SEQUENCE_N_STATES_EVAL_OVERRIDES = {
-    "YGGFLRRIRPKLK": 19,
-    "DAYAQWLADGGPSSGRPPPS": 25,
-    "SYSMEHFRWGKPV": 22,
-    "DNEAYEMPSEEGYQDYEPEA": 22,
-    "RPPGFSPFR": 16,
-    "YYDPETGTWY": 19,
-    "SQETFSDLWKLLPEN": 22,
-    "PLYENKPRRPYIL": 19,
-    "PGPWLEEEEEAYGWMDF": 19,
-    "RPKPQQFFGLM": 19,
-    "QAMDDLMLSPDDIEQWFTEDPGPD": 28,
-    "DSHAKRHHGYKRKFHEKHHSHRGY": 28,
+    "YGGFLRRIRPKLK": 18,
+    "DAYAQWLADGGPSSGRPPPS": 22,
+    "SYSMEHFRWGKPV": 19,
+    "DNEAYEMPSEEGYQDYEPEA": 21,
+    "RPPGFSPFR": 15,
+    "YYDPETGTWY": 17,
+    "SQETFSDLWKLLPEN": 20,
+    "PLYENKPRRPYIL": 18,
+    "PGPWLEEEEEAYGWMDF": 18,
+    "RPKPQQFFGLM": 17,
+    "QAMDDLMLSPDDIEQWFTEDPGPD": 25,
+    "DSHAKRHHGYKRKFHEKHHSHRGY": 26,
 }
 
 
@@ -599,6 +599,13 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     assert cfg.time_ns > 0
     assert cfg.timestep_fs > 0
 
+    swap_interval = int(cfg.get("swap_interval") or cfg.frame_interval)
+    assert swap_interval > 0
+    assert cfg.frame_interval % swap_interval == 0, (
+        f"frame_interval ({cfg.frame_interval}) must be an integer multiple of swap_interval ({swap_interval})"
+    )
+    checkpoint_interval = cfg.frame_interval // swap_interval
+
     assert cfg.get("pdb_dir") is not None or (cfg.get("seq_filename") is not None and cfg.get("seq_idx") is not None), (
         "Either 'pdb_dir' or both 'seq_filename' and 'seq_idx' must be specified in the config"
     )
@@ -624,16 +631,11 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         assert n_states > 1
 
     run_name = f"{sequence}_{int(cfg.min_temp)}K-{int(cfg.max_temp)}K_{n_states}_{cfg.timestep_fs}_{cfg.frame_interval}"
+    if swap_interval != cfg.frame_interval:
+        run_name += f"_swap{swap_interval}"
     if cfg.get("scramble", False):
         run_name += f"_scramble{int(cfg.scramble_seed)}"
     output_dir = Path(cfg.paths.data_dir) / "remd" / run_name
-
-    if cfg.get("scramble", False):
-        # Seed numpy (used by openmmtools for swap-acceptance decisions and other stochastic
-        # choices). OpenMM integrators have per-instance seeds; the scramble integrator is
-        # seeded explicitly below, and the REMD sampler's integrators fall back to OpenMM's
-        # default (OS-random), which we leave alone.
-        np.random.seed(int(cfg.scramble_seed))
 
     platform, platform_properties = setup_platform(cfg)
 
@@ -642,10 +644,10 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     positions = pdb.getPositions(asNumpy=True)
     validate_native_geometry(topology, positions)
 
-    # Calculate number of frames from time period
-    # Each integration step is timestep_fs fs, frame interval steps between frames
-    # time_ns * 1e6 fs/ns = total time in fs = num_frames * frame_interval * timestep_fs
-    num_frames = int(cfg.time_ns * 1e6 / (cfg.frame_interval * cfg.timestep_fs))
+    # Calculate number of iterations (swap attempts) from time period
+    # Each integration step is timestep_fs fs, swap_interval steps between iterations
+    # time_ns * 1e6 fs/ns = total time in fs = num_frames * swap_interval * timestep_fs
+    num_frames = int(cfg.time_ns * 1e6 / (swap_interval * cfg.timestep_fs))
 
     system = get_system(
         topology,
@@ -667,8 +669,10 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         f"{', '.join([f'{t.value_in_unit(unit.kelvin):.1f} K' for t in temperatures])}",
     )
     logger.info(
-        f"Total simulation frames per replica to generate: {num_frames} "
-        f"calculated from {cfg.time_ns:,} ns / ({cfg.frame_interval:,} * {cfg.timestep_fs} fs per saved frame).",
+        f"Total swap-attempt iterations per replica to generate: {num_frames} "
+        f"calculated from {cfg.time_ns:,} ns / ({swap_interval:,} * {cfg.timestep_fs} fs per swap attempt); "
+        f"checkpoints/frames saved every {checkpoint_interval} iterations "
+        f"({cfg.frame_interval:,} * {cfg.timestep_fs} fs per saved frame).",
     )
     thermodynamic_states = [states.ThermodynamicState(system=system, temperature=temp) for temp in temperatures]
     sampler_state = states.SamplerState(
@@ -679,7 +683,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     move = mcmc.LangevinDynamicsMove(
         timestep=cfg.timestep_fs * unit.femtosecond,
         collision_rate=0.3 / unit.picosecond,
-        n_steps=cfg.frame_interval,
+        n_steps=swap_interval,
     )
 
     sampler = multistate.ReplicaExchangeSampler(
@@ -709,7 +713,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
                     s.close()
                 except Exception:
                     pass
-        existing_ns = existing_iter * cfg.frame_interval * cfg.timestep_fs / 1e6
+        existing_ns = existing_iter * swap_interval * cfg.timestep_fs / 1e6
         if existing_ns >= float(exit_early_at_ns):
             logger.info(
                 f"Existing run at {existing_iter} iterations ({existing_ns:.2f} ns) "
@@ -719,18 +723,32 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
 
     reporter = multistate.MultiStateReporter(
         nc_path,
-        checkpoint_interval=1,  # Save coords and velocities every swap attempt
+        checkpoint_interval=checkpoint_interval,  # Save coords/velocities every `checkpoint_interval` swap attempts
         checkpoint_storage=ckpt_path,
     )
 
     if nc_path.exists() and ckpt_path.exists():
         logger.info(f"Resuming from existing simulation files: {nc_path}, {ckpt_path}")
         sampler = multistate.ReplicaExchangeSampler.from_storage(reporter)
+        # from_storage() rebuilds the sampler via __init__, which unconditionally resets the
+        # DEO even/odd toggle to False and isn't itself persisted in checkpoint storage.
+        # Re-derive it from the restored iteration count so the even/odd alternation stays
+        # continuous across a resume instead of possibly repeating the same offset twice.
+        sampler._deo_odd_offset = bool(sampler.iteration % 2)
         is_minimized = bool(getattr(reporter._storage_checkpoint, "is_minimized", 0))
         is_equilibrated = bool(getattr(reporter._storage_checkpoint, "is_equilibrated", 0))
     else:
         logger.info("Starting new REMD simulation from scratch")
         if cfg.get("scramble", False):
+            # Seed numpy (used by openmmtools for swap-acceptance decisions and other
+            # stochastic choices) only here, on a fresh start. Seeding unconditionally on every
+            # invocation (as before) reset this stream to the same point on every resume too,
+            # since checkpoints don't save/restore numpy's global RNG state -- replaying
+            # identical swap-accept/reject decisions after every requeue. OpenMM integrators
+            # have per-instance seeds; the scramble integrator is seeded explicitly below, and
+            # the REMD sampler's integrators fall back to OpenMM's default (OS-random), which
+            # we leave alone.
+            np.random.seed(int(cfg.scramble_seed))
             scrambled_positions = thermal_scramble(
                 topology,
                 system,
@@ -759,22 +777,22 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
             logger.info("Minimized, running warmup/equilibration...")
 
         # Determine number of equilibration iterations from warmup time (preferred)
-        # Each iteration corresponds to `frame_interval * timestep_fs` femtoseconds
+        # Each iteration corresponds to `swap_interval * timestep_fs` femtoseconds
         # convert ns -> fs then to iterations
-        warmup_iterations = int(cfg.warmup_time_ns * 1e6 / (cfg.frame_interval * cfg.timestep_fs))
+        warmup_iterations = int(cfg.warmup_time_ns * 1e6 / (swap_interval * cfg.timestep_fs))
         warmup_iterations = max(1, int(warmup_iterations))
 
         sampler.equilibrate(warmup_iterations)
         reporter._storage_checkpoint.is_equilibrated = 1
         reporter.sync()
-        n_equib_ps = warmup_iterations * cfg.frame_interval * cfg.timestep_fs / 1e3
+        n_equib_ps = warmup_iterations * swap_interval * cfg.timestep_fs / 1e3
         n_equib_ns = n_equib_ps / 1e3
         logger.info(
             f"Warmup done, {warmup_iterations} iterations ({n_equib_ps:.2f} ps / {n_equib_ns:.3f} ns)",
         )
 
     if exit_early_at_ns is not None:
-        target_iter = int(float(exit_early_at_ns) * 1e6 / (cfg.frame_interval * cfg.timestep_fs))
+        target_iter = int(float(exit_early_at_ns) * 1e6 / (swap_interval * cfg.timestep_fs))
         current_iter = sampler.iteration or 0
         remaining = max(0, target_iter - current_iter)
         logger.info(
