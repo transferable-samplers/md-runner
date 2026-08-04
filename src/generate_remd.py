@@ -60,20 +60,51 @@ SEQUENCE_N_STATES_OVERRIDES = {
 }
 
 
+# Eval (1000K) n_states for the xl sequence set, extrapolated per-sequence (not per-length,
+# since these are one-off named sequences rather than a general length bucket) from the
+# actual n_states each sequence used in its production 300-450K run (see
+# /network/scratch/t/tanc/md-runner-remd-reference-xl/data/remd/), preserving that per-rung
+# geometric ratio out to 1000K. For RPKPQQFFGLM/RPPGFSPFR this starts from their
+# SEQUENCE_N_STATES_OVERRIDES-bumped production value (7/6), not the raw hash-auto pick,
+# since the override was there to fix low swap acceptance and that concern still applies here.
+SEQUENCE_N_STATES_EVAL_OVERRIDES = {
+    "YGGFLRRIRPKLK": 19,
+    "DAYAQWLADGGPSSGRPPPS": 25,
+    "SYSMEHFRWGKPV": 22,
+    "DNEAYEMPSEEGYQDYEPEA": 22,
+    "RPPGFSPFR": 16,
+    "YYDPETGTWY": 19,
+    "SQETFSDLWKLLPEN": 22,
+    "PLYENKPRRPYIL": 19,
+    "PGPWLEEEEEAYGWMDF": 19,
+    "RPKPQQFFGLM": 19,
+    "QAMDDLMLSPDDIEQWFTEDPGPD": 28,
+    "DSHAKRHHGYKRKFHEKHHSHRGY": 28,
+}
+
+
 def get_n_states(sequence: str, mode: str = "auto") -> int:
-    if sequence in SEQUENCE_N_STATES_OVERRIDES:
+    is_eval = mode in ("eval", "eval-max")
+    table = N_STATES_DICT_EVAL if is_eval else N_STATES_DICT
+    if is_eval and sequence in SEQUENCE_N_STATES_EVAL_OVERRIDES:
+        return SEQUENCE_N_STATES_EVAL_OVERRIDES[sequence]
+    # SEQUENCE_N_STATES_OVERRIDES was tuned against the production 300-450K ladder; it doesn't
+    # apply to the eval (e.g. 1000K) ladder, which uses SEQUENCE_N_STATES_EVAL_OVERRIDES /
+    # N_STATES_DICT_EVAL instead.
+    if not is_eval and sequence in SEQUENCE_N_STATES_OVERRIDES:
         return SEQUENCE_N_STATES_OVERRIDES[sequence]
     seq_len = len(sequence)
-    if seq_len in N_STATES_DICT:
-        possible_states = N_STATES_DICT[seq_len]
-        if mode == "auto-max":
+    if seq_len in table:
+        possible_states = table[seq_len]
+        if mode in ("auto-max", "eval-max"):
             return max(possible_states)
         if stable_hash(sequence) % 2 == 0:
             return possible_states[0]
         else:
             return possible_states[1]
     else:
-        raise ValueError(f"Sequence length {seq_len} not in N_STATES_DICT")
+        table_name = "N_STATES_DICT_EVAL" if is_eval else "N_STATES_DICT"
+        raise ValueError(f"Sequence length {seq_len} not in {table_name}")
 
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
@@ -178,40 +209,16 @@ def _flat_bottom_torsion_force():
 CHIRALITY_PHI0 = 35.0 * unit.degree
 
 
-def add_chirality_restraints(
-    system,
-    topology,
-    positions,
-    tol=25.0 * unit.degree,
-    k=576.5 * unit.kilocalories_per_mole / unit.radian**2,
-):
-    """Flat-bottom improper restraints preventing unphysical Calpha and Thr/Ile Cbeta
-    stereocenter inversion.
+def _chirality_entries(topology):
+    """Stereocenter impropers: list of (kind, atom_quad, expected theta0_rad).
 
     Every stereocenter gets two impropers: one through its heavy-atom substituent at
     +CHIRALITY_PHI0, one through its hydrogen substituent at -CHIRALITY_PHI0, mirroring the
     (Calpha,N,C,Cbeta)/(Calpha,N,C,Halpha) two-term construction from the reference formula
-    (Eq 18). CHIRALITY_PHI0=35 deg is a fixed tetrahedral-geometry convention value, not read
-    per-residue from the native structure -- confirmed empirically for the backbone term
-    (native impropers cluster at ~35.3 deg regardless of residue/sequence), and expected to
-    hold to the same approximation for Thr/Ile's Cbeta stereocenter for the same underlying
-    reason (ideal tetrahedral bond angles dominate; bond-length differences between
-    substituents are a second-order effect). Gly is skipped (no Cbeta/chirality).
-
-    A hard sanity check compares every native improper against +-CHIRALITY_PHI0; a large
-    deviation means atom ordering got permuted for that residue -- silent and nasty
-    otherwise, so this is a failure rather than a warning.
-
-    Defaults (tol=25 deg, k=576.5 kcal/mol/rad^2 = 25 eV/rad^2) match the reference formula
-    (Eq 18) exactly: phi0=35 deg, phitol=25 deg, kappa=25 eV/rad^2. tol=25 sits below phi0=35,
-    so the flat zone floor (phi0-tol=10 deg) stays clear of the planar/inversion point (0 deg)
-    -- unlike a wider tol, which would let the dihedral cross planar with zero restraint force
-    before the wall ever engages.
+    (Eq 18). Gly is skipped (no Cbeta/chirality).
     """
-    pos = np.array(positions.value_in_unit(unit.nanometer))
     phi0_rad = CHIRALITY_PHI0.value_in_unit(unit.radian)
-
-    entries = []  # (kind, atom_quad, theta0_rad)
+    entries = []
     for residue in topology.residues():
         if residue.name == "GLY":
             continue
@@ -231,6 +238,94 @@ def add_chirality_restraints(
             entries.append(("ILE_CB", (atoms["CB"], atoms["CA"], atoms["CG1"], atoms["CG2"]), phi0_rad))
             if "HB" in atoms:
                 entries.append(("ILE_HB", (atoms["CB"], atoms["CA"], atoms["CG1"], atoms["HB"]), -phi0_rad))
+    return entries
+
+
+def _omega_quads(topology, skip_pro=False):
+    """Backbone omega dihedral quads (CA_i,C_i,N_{i+1},CA_{i+1}). Optionally skip X-Pro bonds."""
+    quads = []
+    for chain in topology.chains():
+        residues = list(chain.residues())
+        for i in range(len(residues) - 1):
+            res_i, res_j = residues[i], residues[i + 1]
+            if skip_pro and res_j.name == "PRO":
+                continue
+            atoms_i = _residue_atom_indices(res_i)
+            atoms_j = _residue_atom_indices(res_j)
+            if not ({"CA", "C"} <= atoms_i.keys() and {"N", "CA"} <= atoms_j.keys()):
+                continue
+            quads.append((atoms_i["CA"], atoms_i["C"], atoms_j["N"], atoms_j["CA"]))
+    return quads
+
+
+def validate_native_geometry(
+    topology,
+    positions,
+    chirality_tol=15.0 * unit.degree,
+    omega_tol=30.0 * unit.degree,
+):
+    """Fail fast if the initializing PDB isn't clean all-L-chirality, all-trans-omega.
+
+    Distinct from add_chirality_restraints/add_omega_restraints, which restrain *sampling*
+    during a run and deliberately leave X-Pro omega unrestrained (cis-Pro is a legitimate
+    state to sample once the simulation is running). This instead checks the *input*
+    structure itself, unconditionally and including X-Pro omega bonds, since a scrambled or
+    hand-built starting PDB should never begin cis or D-amino-acid by construction error --
+    catching that here is far cheaper than discovering it after a multi-day REMD job.
+    """
+    pos = np.array(positions.value_in_unit(unit.nanometer))
+
+    chirality_tol_deg = chirality_tol.value_in_unit(unit.degree)
+    for kind, quad, theta0 in _chirality_entries(topology):
+        native = np.degrees(_dihedral_angle(*(pos[i] for i in quad)))
+        expected = np.degrees(theta0)
+        if abs(native - expected) > chirality_tol_deg:
+            raise ValueError(
+                f"Native {kind} chirality improper is {native:.1f} deg, expected ~{expected:.1f} deg -- "
+                "structure may contain a D-amino acid or permuted atom ordering.",
+            )
+
+    omega_tol_deg = omega_tol.value_in_unit(unit.degree)
+    for quad in _omega_quads(topology, skip_pro=False):
+        native = np.degrees(_dihedral_angle(*(pos[i] for i in quad)))
+        if abs(abs(native) - 180.0) > omega_tol_deg:
+            raise ValueError(
+                f"Native omega dihedral is {native:.1f} deg, expected ~180 deg (trans) -- "
+                "structure may contain a cis peptide bond (including X-Pro).",
+            )
+
+    logger.info("Validated native geometry: all-L chirality, all-trans omega (including X-Pro).")
+
+
+def add_chirality_restraints(
+    system,
+    topology,
+    positions,
+    tol=25.0 * unit.degree,
+    k=576.5 * unit.kilocalories_per_mole / unit.radian**2,
+):
+    """Flat-bottom improper restraints preventing unphysical Calpha and Thr/Ile Cbeta
+    stereocenter inversion.
+
+    CHIRALITY_PHI0=35 deg is a fixed tetrahedral-geometry convention value, not read
+    per-residue from the native structure -- confirmed empirically for the backbone term
+    (native impropers cluster at ~35.3 deg regardless of residue/sequence), and expected to
+    hold to the same approximation for Thr/Ile's Cbeta stereocenter for the same underlying
+    reason (ideal tetrahedral bond angles dominate; bond-length differences between
+    substituents are a second-order effect).
+
+    A hard sanity check compares every native improper against +-CHIRALITY_PHI0; a large
+    deviation means atom ordering got permuted for that residue -- silent and nasty
+    otherwise, so this is a failure rather than a warning.
+
+    Defaults (tol=25 deg, k=576.5 kcal/mol/rad^2 = 25 eV/rad^2) match the reference formula
+    (Eq 18) exactly: phi0=35 deg, phitol=25 deg, kappa=25 eV/rad^2. tol=25 sits below phi0=35,
+    so the flat zone floor (phi0-tol=10 deg) stays clear of the planar/inversion point (0 deg)
+    -- unlike a wider tol, which would let the dihedral cross planar with zero restraint force
+    before the wall ever engages.
+    """
+    pos = np.array(positions.value_in_unit(unit.nanometer))
+    entries = _chirality_entries(topology)
 
     if not entries:
         return
@@ -273,18 +368,7 @@ def add_omega_restraints(
     line, leaving normal thermal fluctuation untouched and walling off only the tail; the
     stiff k keeps that wall effectively impassable just past the edge.
     """
-    quads = []
-    for chain in topology.chains():
-        residues = list(chain.residues())
-        for i in range(len(residues) - 1):
-            res_i, res_j = residues[i], residues[i + 1]
-            if res_j.name == "PRO":
-                continue
-            atoms_i = _residue_atom_indices(res_i)
-            atoms_j = _residue_atom_indices(res_j)
-            if not ({"CA", "C"} <= atoms_i.keys() and {"N", "CA"} <= atoms_j.keys()):
-                continue
-            quads.append((atoms_i["CA"], atoms_i["C"], atoms_j["N"], atoms_j["CA"]))
+    quads = _omega_quads(topology, skip_pro=True)
 
     if not quads:
         return
@@ -531,7 +615,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     if not pdb_path.exists():
         raise FileNotFoundError(f"PDB file not found at {pdb_path}")
 
-    if str(cfg.n_states).lower() in ("auto", "auto-max"):
+    if str(cfg.n_states).lower() in ("auto", "auto-max", "eval", "eval-max"):
         mode = str(cfg.n_states).lower()
         n_states = get_n_states(sequence, mode)
         logger.info(f"{mode}-selected n_states={n_states} for sequence length {len(sequence)}")
@@ -556,6 +640,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     pdb = PDBFile(str(pdb_path))
     topology = pdb.getTopology()
     positions = pdb.getPositions(asNumpy=True)
+    validate_native_geometry(topology, positions)
 
     # Calculate number of frames from time period
     # Each integration step is timestep_fs fs, frame interval steps between frames
