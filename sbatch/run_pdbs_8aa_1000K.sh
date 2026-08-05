@@ -30,7 +30,6 @@ MIN_TEMP=310
 MAX_TEMP=1000
 TIME_NS=5000            # <-- 5 us cap; exit_early_at_ns still stops at 1 us
 EXIT_EARLY_NS=1000
-SWAP_INTERVAL=1000       # <-- 1ps swap attempts (was coupled 1:1 with frame_interval/5ps); checkpoints/frames still every 5ps
 
 TOTAL_PER_JOB=4         # <-- N sequences handled by this slurm task, one fully-parallel MPS wave
 MAX_CONCURRENT=4        # <-- at most 4 python processes at a time (matches run_pdbs_4aa_scramble.sh)
@@ -112,7 +111,6 @@ for ((k=0; k<TOTAL_PER_JOB; k++)); do
     constraints=null \
     timestep_fs=1.0 \
     frame_interval=5000 \
-    swap_interval=$SWAP_INTERVAL \
     chirality_restraint=true \
     omega_restraint=true \
     scramble=true \
