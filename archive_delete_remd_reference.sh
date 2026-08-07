@@ -7,7 +7,7 @@
 #SBATCH -c 1
 #SBATCH --open-mode=append
 #SBATCH --get-user-env
-#SBATCH --array=0-2
+#SBATCH --array=0-0
 
 echo "Node: $HOSTNAME"
 echo "SLURM array ID: $SLURM_ARRAY_TASK_ID"
@@ -15,13 +15,11 @@ echo "SLURM array ID: $SLURM_ARRAY_TASK_ID"
 SCRATCH=/network/scratch/t/tanc
 ARCHIVE=/network/archive/t/tanc
 
-# Only dirs whose checksum verification (job 10282579) came back CLEAN.
-# md-runner-remd-reference-xl is intentionally excluded — its verification
-# was still running when this was submitted.
+# alanine, many, many-300K already deleted (job 10283362, all COMPLETED 0:0).
+# xl's checksum verification (job 10282579 task 3) came back CLEAN, so it's
+# now cleared for deletion too.
 DIRS=(
-    md-runner-remd-reference-alanine
-    md-runner-remd-reference-many
-    md-runner-remd-reference-many-300K
+    md-runner-remd-reference-xl
 )
 
 NAME="${DIRS[$SLURM_ARRAY_TASK_ID]}"

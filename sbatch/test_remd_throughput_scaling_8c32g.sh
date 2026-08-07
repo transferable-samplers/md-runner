@@ -1,11 +1,11 @@
 #!/bin/bash
-#SBATCH -J remd_throughput_scaling
+#SBATCH -J remd_throughput_scaling_8c32g
 #SBATCH -o watch_folder/%x_%A_%a.out
-#SBATCH --mem=48G
+#SBATCH --mem=32G
 #SBATCH -t 04:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:rtx8000:1
-#SBATCH -c 16
+#SBATCH -c 8
 #SBATCH --array=0-15
 #SBATCH --open-mode=append
 #SBATCH --requeue
@@ -23,18 +23,16 @@ mkdir -p watch_folder
 # ============================
 # Configuration
 # ============================
-# Concurrency-scaling extension of test_remd_throughput_longest.sh: same longest xl
-# sequence (DSHAKRHHGYKRKFHEKHHSHRGY, seq_idx=11, 417 atoms), same timing method
-# (parse openmmtools' own "Iteration took X.XXXs" log lines during equilibration,
-# kill once enough are collected -- see that script for the full rationale), but now
-# sweeping the number of concurrent replicas N=1..8 sharing one GPU, instead of a
-# fixed N=4. N=1 is a solo/no-MPS baseline (nothing to share, so MPS is moot); N=2..8
-# all run with MPS on, to see how per-replica throughput holds up as contention
-# increases. -c 16 covers up to 8 concurrent processes at ~2 cores each.
+# Resource-scaled repeat of test_remd_throughput_scaling.sh (same longest xl sequence,
+# same timing method, same 2-ladder x N=1..8-concurrency condition matrix), run under
+# a smaller allocation (8 CPU / 32GB RAM vs the original 16 CPU / 48GB) to see whether
+# throughput is sensitive to host-side CPU/RAM headroom at high replica counts, or is
+# purely GPU-bound as expected. Separate TEST_SCRATCH_ROOT so results never collide
+# with the original 16c/48G sweep's data.
 SEQ_FILE="sequences/xl.txt"
 SEQ_IDX=11
 
-TEST_SCRATCH_ROOT=/network/scratch/t/tanc/md-runner-throughput-test-xl
+TEST_SCRATCH_ROOT=/network/scratch/t/tanc/md-runner-throughput-test-xl-8c32g
 
 N_SKIP=3
 N_MEASURE=20
@@ -67,7 +65,7 @@ echo "Condition: ladder=$LADDER n_replicas=$N_REPLICAS use_mps=$USE_MPS"
 if [ "$LADDER" = "450K" ]; then
   # Mirrors run_xl.sh's REMD parameters (production ladder, n_states=auto).
   # PDB_DIR points at the -1000K reference's pdb store (same file, flat layout) since
-  # md-runner-remd-reference-xl/data/pdbs was archived+deleted mid-sweep.
+  # md-runner-remd-reference-xl/data/pdbs was archived+deleted.
   PDB_DIR=/network/scratch/t/tanc/md-runner-remd-reference-xl-1000K/data
   MIN_TEMP=300
   MAX_TEMP=450
