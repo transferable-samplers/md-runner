@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J generate_remd_xl_1000K
 #SBATCH -o watch_folder/%x_%A_%a.out
-#SBATCH --mem=32G
+#SBATCH --mem=64G
 #SBATCH -t 7-00:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:rtx8000:1
