@@ -16,6 +16,22 @@ seq_idx: null
 min_temp: 300
 max_temp: 450
 n_states: null
+
+# Per-sequence pseudorandom ladder endpoints (see draw_temp_range in src/generate_remd.py).
+# When enabled, min_temp/max_temp above become the *mode* of each endpoint's distribution:
+#   T_min ~ density decaying linearly from min_temp (peak) to zero at temp_jitter_min_to
+#   T_max ~ triangular on [temp_jitter_max_lo, temp_jitter_max_hi] peaking at max_temp
+#          (temp_jitter_max_hi == max_temp gives the one-sided mirror of T_min, i.e. a linear
+#          decay from max_temp down to temp_jitter_max_lo and never a ladder above max_temp)
+# Drawn deterministically from (sequence, temp_jitter_seed), so requeues resume the same run.
+# Pooled over many sequences this gives continuous replica-temperature coverage of
+# 300-470K instead of the handful of fixed rungs, at ~0.95x the tuned rung spacing on
+# average (worst case 1.11x). Run dirs get the drawn endpoints at 0.1K and a _tjit<seed> suffix.
+temp_jitter: false
+temp_jitter_seed: 0
+temp_jitter_min_to: 320 # Kelvin; T_min density reaches zero here
+temp_jitter_max_lo: 430 # Kelvin; lower end of the T_max triangle
+temp_jitter_max_hi: 470 # Kelvin; upper end of the T_max triangle
 timestep_fs: 2.0
 constraints: HBonds # One of: HBonds, AllBonds, HAngles, or null for no constraints
 com_restraint: false # Apply force to keep COM of peptide complexes together

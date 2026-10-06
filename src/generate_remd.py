@@ -121,6 +121,41 @@ def geometric_temps(min_temp: float, max_temp: float, n_states: int) -> unit.Qua
     )
 
 
+def draw_temp_range(
+    sequence: str,
+    min_temp: float,
+    min_temp_to: float,
+    max_temp_lo: float,
+    max_temp: float,
+    max_temp_hi: float,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """Per-sequence pseudorandom (T_min, T_max) in Kelvin for a jittered ladder.
+
+    With a fixed 300-450K ladder every sequence of a given length puts its replicas on the
+    same handful of temperatures, so the pooled replica-temperature histogram over a dataset
+    is a few spikes with most of 300-450K empty. Drawing the ladder endpoints per sequence
+    spreads the rungs out so that histogram becomes continuous, while keeping each ladder
+    close to the tuned spacing (worst case min_temp->max_temp_hi, ~11% wider for the
+    defaults; typical draws are slightly narrower):
+
+      T_min: density decays linearly from its maximum at `min_temp` to zero at
+             `min_temp_to`, so most ladders still start near the target temperature.
+             Inverse-CDF: T_min = min_temp_to - (min_temp_to - min_temp) * sqrt(u).
+      T_max: triangular on [max_temp_lo, max_temp_hi] peaking at `max_temp`. Setting
+             max_temp_hi == max_temp makes this the mirror of T_min: a linear decay from
+             `max_temp` down to zero at max_temp_lo, with no ladder topping out above it.
+
+    Seeded from stable_hash(sequence) and `seed` with a fixed draw order, so re-running (or
+    resuming a requeued job) reproduces the same ladder and hence the same run directory.
+    """
+    assert min_temp < min_temp_to <= max_temp_lo < max_temp <= max_temp_hi
+    rng = np.random.default_rng([stable_hash(sequence), int(seed)])
+    t_min = min_temp_to - (min_temp_to - min_temp) * np.sqrt(rng.uniform())
+    t_max = rng.triangular(max_temp_lo, max_temp, max_temp_hi)
+    return float(t_min), float(t_max)
+
+
 def add_com_restraint(
     system,
     topology,
@@ -447,6 +482,7 @@ def thermal_scramble(
     platform,
     platform_properties,
     cfg,
+    min_temp=None,
 ):
     """Heat-cool cycle to produce a decorrelated starting structure before REMD.
 
@@ -459,7 +495,7 @@ def thermal_scramble(
 
     The scrambling trajectory is not equilibrium sampling; only the final snapshot is returned.
     """
-    target_T = cfg.min_temp * unit.kelvin
+    target_T = (cfg.min_temp if min_temp is None else min_temp) * unit.kelvin
     high_T = cfg.scramble_high_temp * unit.kelvin
     dt = cfg.timestep_fs * unit.femtosecond
     steps_per_ps = int(round(1000.0 / cfg.timestep_fs))
@@ -497,7 +533,7 @@ def thermal_scramble(
 
     logger.info(
         f"Thermal scramble (seed={cfg.scramble_seed}): "
-        f"{cfg.min_temp}K -> {cfg.scramble_high_temp}K over {cfg.scramble_ramp_up_ps} ps, "
+        f"{target_T.value_in_unit(unit.kelvin):.1f}K -> {cfg.scramble_high_temp}K over {cfg.scramble_ramp_up_ps} ps, "
         f"hold {cfg.scramble_hold_ps} ps, cool over {cfg.scramble_ramp_down_ps} ps, "
         f"equilibrate {cfg.scramble_equilibrate_ps} ps.",
     )
@@ -630,7 +666,28 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         n_states = int(cfg.n_states)
         assert n_states > 1
 
-    run_name = f"{sequence}_{int(cfg.min_temp)}K-{int(cfg.max_temp)}K_{n_states}_{cfg.timestep_fs}_{cfg.frame_interval}"
+    if cfg.get("temp_jitter", False):
+        min_temp, max_temp = draw_temp_range(
+            sequence,
+            cfg.min_temp,
+            cfg.temp_jitter_min_to,
+            cfg.temp_jitter_max_lo,
+            cfg.max_temp,
+            cfg.temp_jitter_max_hi,
+            cfg.temp_jitter_seed,
+        )
+        logger.info(
+            f"temp_jitter (seed={cfg.temp_jitter_seed}): drew T_min={min_temp:.2f}K, T_max={max_temp:.2f}K "
+            f"(T_min linear decay {cfg.min_temp}->{cfg.temp_jitter_min_to}K; "
+            f"T_max triangular {cfg.temp_jitter_max_lo}/{cfg.max_temp}/{cfg.temp_jitter_max_hi}K)",
+        )
+        # Drawn endpoints at 0.1K so the directory name stays unique per draw; the exact
+        # ladder is in temperatures.txt and the .nc thermodynamic states.
+        run_name = f"{sequence}_{min_temp:.1f}K-{max_temp:.1f}K_{n_states}_{cfg.timestep_fs}_{cfg.frame_interval}"
+        run_name += f"_tjit{int(cfg.temp_jitter_seed)}"
+    else:
+        min_temp, max_temp = float(cfg.min_temp), float(cfg.max_temp)
+        run_name = f"{sequence}_{int(cfg.min_temp)}K-{int(cfg.max_temp)}K_{n_states}_{cfg.timestep_fs}_{cfg.frame_interval}"
     if swap_interval != cfg.frame_interval:
         run_name += f"_swap{swap_interval}"
     if cfg.get("scramble", False):
@@ -663,7 +720,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
         omega_k=cfg.get("omega_k_kcal", 576.5) * unit.kilocalories_per_mole / unit.radian**2,
     )
 
-    temperatures = geometric_temps(cfg.min_temp * unit.kelvin, cfg.max_temp * unit.kelvin, n_states)
+    temperatures = geometric_temps(min_temp * unit.kelvin, max_temp * unit.kelvin, n_states)
     logger.info(
         f"Simulating system {pdb_path} with {n_states} replicas at temperatures: "
         f"{', '.join([f'{t.value_in_unit(unit.kelvin):.1f} K' for t in temperatures])}",
@@ -695,6 +752,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    np.savetxt(output_dir / "temperatures.txt", np.array([t.value_in_unit(unit.kelvin) for t in temperatures]))
     nc_path = output_dir / "remd.nc"
     ckpt_path = output_dir / "remd_checkpoint.nc"
 
@@ -756,6 +814,7 @@ def generate_remd(cfg: DictConfig) -> None:  # noqa: C901
                 platform,
                 platform_properties,
                 cfg,
+                min_temp=min_temp,
             )
             PDBFile.writeFile(topology, scrambled_positions, str(output_dir / "scramble_snapshot.pdb"))
             sampler_state = states.SamplerState(
