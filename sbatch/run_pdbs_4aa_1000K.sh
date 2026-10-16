@@ -2,14 +2,14 @@
 #SBATCH -J generate_remd_pdbs_4aa_1000K
 #SBATCH -o watch_folder/%x_%A_%a.out
 #SBATCH --mem=64G
-#SBATCH -t 7-00:00:00
+#SBATCH -t 1-00:00:00
 #SBATCH --partition=long
 #SBATCH --gres=gpu:rtx8000:1
 #SBATCH -c 8
 #SBATCH --array=0-8
 #SBATCH --open-mode=append
 #SBATCH --requeue
-#SBATCH --signal=SIGUSR1@90
+#SBATCH --signal=B:SIGUSR1@90
 #SBATCH --exclude=cn-g[001-029],cn-k[001-004],cn-b[001-005],cn-i001,cn-j001
 #SBATCH --get-user-env
 
@@ -82,7 +82,13 @@ cleanup() {
   echo quit | nvidia-cuda-mps-control >/dev/null 2>&1 || true
   rm -rf "$MPS_DIR" || true
 }
-trap cleanup EXIT SIGUSR1 SIGTERM SIGINT
+requeue_and_cleanup() {
+  echo "Received SIGUSR1 (approaching time limit) -- requesting requeue..."
+  scontrol requeue "${SLURM_ARRAY_JOB_ID}_${SLURM_ARRAY_TASK_ID}" || true
+  cleanup
+}
+trap cleanup EXIT SIGTERM SIGINT
+trap requeue_and_cleanup SIGUSR1
 
 nvidia-cuda-mps-control -d
 echo "MPS server started at $CUDA_MPS_PIPE_DIRECTORY"

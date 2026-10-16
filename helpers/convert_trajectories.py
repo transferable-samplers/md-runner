@@ -7,9 +7,10 @@ import numpy as np
 from tqdm import tqdm
 
 
-def load_trajectory(path: str) -> tuple[np.ndarray, np.ndarray]:
+def load_trajectory(path: str, stride: int = 1) -> tuple[np.ndarray, np.ndarray]:
     """Load an REMD trajectory npz. Returns (temperatures[T], positions[T, F, N, 3]).
-    Drops frame 0 per replica (initial state)."""
+    Drops frame 0 per replica (initial state), then keeps every `stride`-th
+    frame (in time order) of what remains."""
     with np.load(path) as z:
         temps = np.asarray(z["temperatures"], dtype=np.float32)
         key_by_temp: dict[float, str] = {}
@@ -19,7 +20,7 @@ def load_trajectory(path: str) -> tuple[np.ndarray, np.ndarray]:
         positions_list = []
         for t in temps:
             match_t = min(key_by_temp.keys(), key=lambda x: abs(x - float(t)))
-            positions_list.append(np.asarray(z[key_by_temp[match_t]][1:], dtype=np.float32))
+            positions_list.append(np.asarray(z[key_by_temp[match_t]][1::stride], dtype=np.float32))
         positions = np.stack(positions_list, axis=0)  # (T, F, N, 3)
     return temps, positions
 
@@ -36,6 +37,7 @@ def convert_one(
     dst_dir: str,
     suffix: str,
     global_seed: int,
+    stride: int = 1,
 ) -> str:
     pos_out = os.path.join(dst_dir, f"{seq_name}.pos.npy")
     temps_out = os.path.join(dst_dir, f"{seq_name}.temps.npy")
@@ -46,7 +48,7 @@ def convert_one(
     if not os.path.exists(src):
         raise FileNotFoundError(src)
 
-    temps, positions = load_trajectory(src)  # (T,), (T, F, N, 3)
+    temps, positions = load_trajectory(src, stride=stride)  # (T,), (T, F, N, 3)
     T, F, N, _ = positions.shape
 
     ss = _seed_for(global_seed, seq_name)
@@ -71,6 +73,12 @@ def main() -> None:
     p.add_argument("--trajectory-file-suffix", default=".trajectories")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--workers", type=int, default=8)
+    p.add_argument(
+        "--stride",
+        type=int,
+        default=1,
+        help="Keep every Nth frame (in time order) per replica, after dropping frame 0.",
+    )
     args = p.parse_args()
 
     os.makedirs(args.dst_dir, exist_ok=True)
@@ -94,6 +102,7 @@ def main() -> None:
                 args.dst_dir,
                 args.trajectory_file_suffix,
                 args.seed,
+                args.stride,
             )
             for name in seq_names
         ]

@@ -29,6 +29,11 @@ from typing import Optional, Tuple
 import numpy as np
 from openmmtools import multistate
 
+# Number of checkpoint frames read per block in
+# demultiplex_trajectories_from_reporter(). Bounds peak RSS to roughly the
+# float32 output array plus one block, instead of the whole checkpoint file.
+CHECKPOINT_CHUNK_FRAMES = 512
+
 
 def find_remd_runs(remd_root: Path) -> list[Path]:
     """Return run directories containing both remd.nc and remd_checkpoint.nc."""
@@ -56,10 +61,14 @@ def demultiplex_trajectories_from_reporter(
     analysis = reporter._storage_analysis
     checkpoint_interval = int(checkpoint.CheckpointInterval)
 
-    positions = np.array(checkpoint.variables["positions"][:])  # (n_ckpt, replica, atom, 3)
+    # Left lazy: indexed in blocks below rather than read whole. Reading it
+    # whole held a second full copy alongside demux_pos, doubling peak RSS --
+    # 40G for the longest xl runs, which OOM'd a 32G cgroup before writing a
+    # single state.
+    ckpt_positions = checkpoint.variables["positions"]  # (n_ckpt, replica, atom, 3)
     all_states = np.array(analysis.variables["states"][:])  # (n_iter, replica)
 
-    n_ckpt, n_replicas, n_atoms, _ = positions.shape
+    n_ckpt, n_replicas, n_atoms, _ = ckpt_positions.shape
 
     ckpt_indices = np.arange(n_ckpt) * checkpoint_interval
     if ckpt_indices[-1] >= all_states.shape[0]:
@@ -73,9 +82,12 @@ def demultiplex_trajectories_from_reporter(
 
     demux_pos = np.zeros((n_replicas, n_ckpt, n_atoms, 3), dtype=np.float32)
 
-    for frame in range(n_ckpt):
-        order = np.argsort(states_at_ckpt[frame])
-        demux_pos[:, frame] = positions[frame, order]
+    for start in range(0, n_ckpt, CHECKPOINT_CHUNK_FRAMES):
+        stop = min(start + CHECKPOINT_CHUNK_FRAMES, n_ckpt)
+        block = np.asarray(ckpt_positions[start:stop], dtype=np.float32)
+        for offset, frame in enumerate(range(start, stop)):
+            order = np.argsort(states_at_ckpt[frame])
+            demux_pos[:, frame] = block[offset, order]
 
     return demux_pos
 
