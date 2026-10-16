@@ -185,3 +185,6 @@ watch_folder_old/*
 # SLURM watch folders
 *watch_folder*/*
 test_pdbs/*
+
+# Held-out evaluation targets (kept local)
+sequences/xl.txt
