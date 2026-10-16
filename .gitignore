@@ -188,3 +188,6 @@ test_pdbs/*
 
 # Held-out evaluation targets (kept local)
 sequences/xl.txt
+
+# replix: separate private repo (github.com/charliebtan/replix), checked out here
+replix/
