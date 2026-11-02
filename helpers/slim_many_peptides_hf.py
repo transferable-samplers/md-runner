@@ -188,14 +188,14 @@ def main():
     staging = args.work_dir / "staging"
     shutil.rmtree(staging, ignore_errors=True)  # partial outputs from a killed run
 
-    def commit(records):
+    def commit(records, batch_no):
         if not args.dry_run:
             api.upload_folder(
                 repo_id=REPO_ID,
                 repo_type="dataset",
                 revision=args.target_revision,
                 folder_path=staging,
-                commit_message=f"Drop velocities, subsample train x{args.stride} ({len(records)} files)",
+                commit_message=f"removing velocity + subsampling train batch: {batch_no}",
             )
             # confirm the remote holds exactly the bytes we wrote
             remote = lfs_sha_map(api, args.target_revision)
@@ -208,6 +208,8 @@ def main():
         shutil.rmtree(staging, ignore_errors=True)
         print(f"{'(dry-run) ' if args.dry_run else ''}committed {len(records)} files", flush=True)
 
+    # batch numbers continue across resumed runs
+    first_batch = -(-len(done) // args.shard_size) + 1
     with ProcessPoolExecutor(args.workers) as ex:
         # chunked submission bounds staging/download disk use to ~shard_size files
         for start in range(0, len(pending), args.shard_size):
@@ -219,7 +221,7 @@ def main():
                 records.append(r)
                 print(f"  {r['path']}: {r['source_shapes']['positions'][0]}->{r['kept_shapes']['positions'][0]} "
                       f"frames, {r['source_size'] / 1e6:.0f}->{r['new_size'] / 1e6:.1f} MB", flush=True)
-            commit(records)
+            commit(records, first_batch + start // args.shard_size)
 
 
 if __name__ == "__main__":
