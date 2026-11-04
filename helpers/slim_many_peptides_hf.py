@@ -48,6 +48,10 @@ def expected_source(path_in_repo: str) -> tuple[set[str], int]:
         return TRAJ_KEYS, 200_000  # 200 ns @ 1 ps
     if path_in_repo.startswith(("trajectories/val/", "trajectories/test/")):
         return TRAJ_KEYS, 500_000  # 5 us @ 10 ps
+    if path_in_repo.startswith("trajectories_subsampled/val/8AA/"):
+        # re-uploaded with the TICA fix (c45abcc, 2025-11-20): already no velocities,
+        # 50k frames (100 ps) instead of 10k. Passed through unchanged.
+        return SUBSAMPLED_KEYS - {"velocities"}, 50_000
     if path_in_repo.startswith("trajectories_subsampled/"):
         return SUBSAMPLED_KEYS, 10_000  # 5 us @ 500 ps
     raise ValueError(f"unexpected path {path_in_repo}")
@@ -57,11 +61,14 @@ def check_source(path_in_repo: str, d) -> None:
     keys, n_frames = expected_source(path_in_repo)
     if set(d.files) != keys:
         raise RuntimeError(f"{path_in_repo}: source keys {sorted(d.files)} != expected {sorted(keys)}")
-    pos, vel = d["positions"], d["velocities"]
+    pos = d["positions"]
     if pos.ndim != 3 or pos.shape[2] != 3 or pos.dtype != np.float32:
         raise RuntimeError(f"{path_in_repo}: positions {pos.shape} {pos.dtype}, expected (T, N, 3) float32")
     if pos.shape[0] != n_frames:
         raise RuntimeError(f"{path_in_repo}: {pos.shape[0]} frames != expected {n_frames}")
+    if "velocities" not in keys:
+        return
+    vel = d["velocities"]
     if vel.shape != pos.shape or vel.dtype != pos.dtype:
         raise RuntimeError(f"{path_in_repo}: velocities {vel.shape} {vel.dtype} != positions {pos.shape} {pos.dtype}")
 

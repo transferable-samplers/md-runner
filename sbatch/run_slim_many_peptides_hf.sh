@@ -1,10 +1,10 @@
 #!/bin/bash
 #SBATCH -J slim_many_peptides_hf
 #SBATCH -o watch_folder/%x_%j.out
-#SBATCH --partition=long-cpu
-#SBATCH -c 16
-#SBATCH --mem=64G
-#SBATCH -t 7-00:00:00
+#SBATCH --partition=main-cpu
+#SBATCH -c 7
+#SBATCH --mem=28G
+#SBATCH -t 5-00:00:00
 #SBATCH --open-mode=append
 #SBATCH --requeue
 #SBATCH --get-user-env
