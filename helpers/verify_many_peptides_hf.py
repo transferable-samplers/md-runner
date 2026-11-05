@@ -46,7 +46,8 @@ def check_content(rec: dict, revision: str, tmp_root: str, stride: int) -> list[
             is_train = rec["path"].startswith("trajectories/train/")
             if rec["stride"] != (stride if is_train else 1):
                 errs.append(f"manifest stride {rec['stride']} unexpected")
-            n_exp = src_frames // (stride if is_train else 1)
+            # fix records (resubsample_val8aa_hf.py) carry their own target frame count
+            n_exp = rec.get("expected_frames", src_frames // (stride if is_train else 1))
             if "positions" in d.files and d["positions"].shape[0] != n_exp:
                 errs.append(f"positions frames {d['positions'].shape[0]} != {n_exp}")
             for k, dig in rec["kept_digests"].items():
@@ -66,7 +67,7 @@ def main():
     args = p.parse_args()
 
     recs = [json.loads(line) for line in args.manifest.read_text().splitlines() if line]
-    by_path = {r["path"]: r for r in recs}
+    by_path = {r["path"]: r for r in recs}  # later records (fixes) supersede earlier ones
     remote = lfs_sha_map(HfApi(), args.revision)
     failures = {}
 
@@ -81,7 +82,7 @@ def main():
     print(f"metadata check: {len(by_path)} manifest entries, {len(failures)} failures", flush=True)
 
     if args.redownload:
-        todo = [r for r in recs if r["path"] not in failures]
+        todo = [r for r in by_path.values() if r["path"] not in failures]
         with ProcessPoolExecutor(args.workers) as ex:
             futs = {ex.submit(check_content, r, args.revision, args.tmp_dir, args.stride): r["path"] for r in todo}
             for i, fut in enumerate(as_completed(futs), 1):
